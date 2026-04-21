@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic-settings
+sqlalchemy
+aiomysql
+redis
+google-generativeai
+pyjwt
+passlib
+bcrypt
+alembic

@@ -1,0 +1,53 @@
+Chatbot/
+├── app/
+│   ├── api/
+│   │   └── v1/
+│   │       ├── routes/
+│   │       │   ├── auth.py
+│   │       │   ├── chat.py
+│   │       │   ├── sessions.py
+│   │       │   └── users.py
+│   │       └── dependencies.py
+│   ├── core/
+│   │   ├── config.py
+│   │   ├── security.py
+│   │   ├── middleware.py
+│   │   └── exceptions.py
+│   ├── models/
+│   │   ├── user.py
+│   │   ├── session.py
+│   │   └── message.py
+│   ├── schemas/
+│   │   ├── auth.py
+│   │   ├── chat.py
+│   │   └── session.py
+│   ├── services/
+│   │   ├── auth_service.py
+│   │   ├── chat_service.py
+│   │   └── session_service.py
+│   ├── repositories/
+│   │   ├── base_repo.py
+│   │   ├── user_repo.py
+│   │   ├── session_repo.py
+│   │   ├── message_repo.py
+│   │   └── summary_repo.py
+│   ├── ai/
+│   │   ├── gemini_client.py
+│   │   ├── prompt_builder.py
+│   │   ├── memory_manager.py
+│   │   ├── intent_detector.py
+│   │   └── memory_orchestrator.py
+│   └── db/
+│       ├── database.py
+│       ├── redis.py
+│       └── migrations/
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── .env
+├── .gitignore
+├── Documentation.docx
+├── Dockerfile
+├── main.py
+├── requirements.txt
+└── structure.txt

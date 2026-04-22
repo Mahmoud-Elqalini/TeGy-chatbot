@@ -10,3 +10,13 @@ class UserRepository(BaseRepository[User]):
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> List[User]:
         return await super().get_all(skip, limit, order_by=desc(self.model.created_at))
+
+    async def get_by_name(self, name: str) -> Optional[User]:
+        query = select(self.model).filter(self.model.name == name)
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_email(self, email: str) -> Optional[User]:
+        query = select(self.model).filter(self.model.email == email)
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()

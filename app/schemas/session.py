@@ -7,7 +7,7 @@ class SessionBase(BaseModel):
     title: Optional[str] = None
 
 class SessionCreate(SessionBase):
-    user_id: uuid.UUID
+    pass
 
 class SessionUpdate(BaseModel):
     title: Optional[str] = None

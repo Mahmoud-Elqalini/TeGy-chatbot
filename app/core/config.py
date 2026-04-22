@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     # Database Config
-    MYSQL_URL: str
+    DATABASE_URL: str
 
     # Redis Config
     REDIS_HOST: str = "localhost"

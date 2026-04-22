@@ -10,6 +10,7 @@ class Session(Base):
     user_id = Column(Uuid, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=True)
     current_intent = Column(String(100), nullable=True)
+    current_summary = Column(Text, nullable=True)
     last_active = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

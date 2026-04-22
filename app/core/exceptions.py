@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -23,7 +22,11 @@ class ForbiddenException(AppException):
         super().__init__(403, detail)
 
 class InvalidTokenException(AppException):
-    def __init__(self, detail: str = "Invalid or expired token"):
+    def __init__(self, detail: str = "Invalid token"):
+        super().__init__(401, detail)
+
+class TokenExpiredException(AppException):
+    def __init__(self, detail: str = "Token has expired"):
         super().__init__(401, detail)
 
 
@@ -47,10 +50,28 @@ class SessionNotFoundException(AppException):
         super().__init__(404, detail)
 
 
+# ─── Message ──────────────────────────────────────────────────────────────────
+class MessageNotFoundException(AppException):
+    def __init__(self, detail: str = "Message not found"):
+        super().__init__(404, detail)
+
+
 # ─── AI ───────────────────────────────────────────────────────────────────────
 class AIException(AppException):
     def __init__(self, detail: str = "AI service error"):
         super().__init__(502, detail)
+
+class AITimeoutException(AIException):
+    def __init__(self, detail: str = "AI service connection timed out"):
+        super().__init__(detail)
+
+class AITransientException(AIException):
+    def __init__(self, detail: str = "AI service transient error"):
+        super().__init__(detail)
+
+class LLMUnavailableException(AIException):
+    def __init__(self, detail: str = "LLM exhausted retries or is completely unreachable"):
+        super().__init__(detail)
 
 
 # ─── General ──────────────────────────────────────────────────────────────────
@@ -66,24 +87,4 @@ class RateLimitException(AppException):
     def __init__(self, detail: str = "Too many requests"):
         super().__init__(429, detail)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Register Handlers on the FastAPI app
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def register_exception_handlers(app: FastAPI) -> None:
-    """It is called in main.py once"""
-
-    @app.exception_handler(AppException)
-    async def app_exception_handler(request: Request, exc: AppException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail},
-        )
-
-    @app.exception_handler(Exception)
-    async def generic_exception_handler(request: Request, exc: Exception):
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        )
+

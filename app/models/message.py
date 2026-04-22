@@ -10,6 +10,7 @@ class Message(Base):
     session_id = Column(Uuid, ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
     content = Column(Text, nullable=False)
     role = Column(SQLEnum('user', 'assistant', 'system', name='message_roles'), nullable=False)
+    status = Column(SQLEnum('pending', 'completed', 'failed', name='message_status'), nullable=False, default='completed')
     sending_time = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     # Relationships

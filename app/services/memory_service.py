@@ -6,7 +6,7 @@ from app.ai.memory_manager import MemoryManager, SessionContext
 logger = logging.getLogger(__name__)
 
 
-class MemoryOrchestrator:
+class MemoryService:
     def __init__(self, memory: MemoryManager):
         self._mem = memory
 
@@ -54,6 +54,26 @@ class MemoryOrchestrator:
         await self._mem.update_summary(session_id, summary)
         await self._mem.reset_counter(session_id)
         logger.info("summary updated for session %s", session_id)
+
+    async def summarize_session(self, session_id: str) -> None:
+        """
+        Background task hook that triggers the explicit summarization flow.
+        Expects the lock to have been acquired upstream; strictly releases it when done.
+        """
+        logger.info(f"Summarization Task Triggered explicitly for session {session_id}")
+        
+        try:
+            # NOTE: Implement actual summary execution here delegating to AI client
+            # Example logic:
+            # summary = await self._some_ai_client.summarize(messages)
+            # await self.after_summarization(session_id, summary)
+            pass
+        finally:
+            await self.release_summarize_lock(session_id)
+
+    async def release_summarize_lock(self, session_id: str) -> None:
+        """Public interface to explicitly release a locked session state (e.g. during crash recovery)."""
+        await self._mem.release_summarize_lock(session_id)
 
     async def build_llm_payload(
         self,

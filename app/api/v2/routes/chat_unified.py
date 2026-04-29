@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.db_deps import get_chatbot_session
 from app.api.v1.auth_deps import get_auth_context, get_current_user
+from app.db.redis import get_redis
 from app.schemas.chat_unified import (
     ChatMessageRequestV2,
     ChatIntegrationResponse,

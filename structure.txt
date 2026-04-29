@@ -1,53 +1,59 @@
-Chatbot/
-├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── routes/
-│   │       │   ├── auth.py
-│   │       │   ├── chat.py
-│   │       │   ├── sessions.py
-│   │       │   └── users.py
-│   │       └── dependencies.py
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── security.py
-│   │   ├── middleware.py
-│   │   └── exceptions.py
-│   ├── models/
-│   │   ├── user.py
-│   │   ├── session.py
-│   │   └── message.py
-│   ├── schemas/
-│   │   ├── auth.py
-│   │   ├── chat.py
-│   │   └── session.py
-│   ├── services/
-│   │   ├── auth_service.py
-│   │   ├── chat_service.py
-│   │   └── session_service.py
-│   ├── repositories/
-│   │   ├── base_repo.py
-│   │   ├── user_repo.py
-│   │   ├── session_repo.py
-│   │   ├── message_repo.py
-│   │   └── summary_repo.py
-│   ├── ai/
-│   │   ├── gemini_client.py
-│   │   ├── prompt_builder.py
-│   │   ├── memory_manager.py
-│   │   ├── intent_detector.py
-│   │   └── memory_orchestrator.py
-│   └── db/
-│       ├── database.py
-│       ├── redis.py
-│       └── migrations/
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── .env
-├── .gitignore
-├── Documentation.docx
-├── Dockerfile
-├── main.py
-├── requirements.txt
-└── structure.txt
+AI Chatbot Backend - Final Production Structure
+============================================
+
+app/
+├── main.py                     # Entry point (FastAPI initialization & lifespan)
+├── ai/                         # Artificial Intelligence Core
+│   ├── providers/              # LLM Model Providers
+│   │   ├── base.py             # Abstract base classes for LLMs
+│   │   └── gemini_provider.py  # Google Gemini implementation
+│   ├── intent_detector.py      # Rule-based + LLM hybrid classifier
+│   ├── intent_router.py        # Decision layer (Routing: fast_path/llm_path)
+│   ├── memory_manager.py       # Redis-based session memory & lifecycle hooks
+│   ├── prompt_builder.py       # Templates for System/History/User prompts
+│   ├── response_generator.py   # Token counting & simple/streaming generation
+│   ├── safety.py               # Input/Output validation & AI safety settings
+│   └── tool_registry.py        # Tool definition and dynamic execution
+├── api/                        # API Delivery Layer
+│   └── v1/
+│       ├── dependencies.py     # Shared DI (Auth, DB, Redis)
+│       └── routes/             # Endpoint Definitions
+│           ├── auth.py         # Authentication & User Management
+│           ├── chat.py         # Main Conversational Endpoints
+│           ├── chat_integration.py # External System Integration
+│           ├── health.py       # System Status & Monitoring
+│           └── sessions.py     # Chat Session CRUD
+├── core/                       # Infrastructure & Configuration
+│   ├── config.py               # Environment settings (Pydantic Settings)
+│   ├── exceptions.py           # Global exception definitions
+│   ├── observability.py        # Structured logging & monitoring
+│   └── rate_limiter.py         # Redis-based sliding window rate limiting
+├── db/                         # Database Access Layer
+│   ├── postgres.py             # SQLAlchemy Async engine & session
+│   └── redis.py                # Redis client & key management
+├── models/                     # Data Models (SQLAlchemy)
+│   └── chatbot/                # Chat-specific DB entities
+│       ├── message.py          # Chat message schema
+│       ├── session.py          # Session metadata schema
+│       └── user.py             # Chat user profile schema
+├── repositories/               # Data Access Patterns (CRUD)
+│   ├── chatbot_user_repo.py
+│   ├── message_repo.py
+│   └── session_repo.py
+├── schemas/                    # Pydantic Data Validation (DTOs)
+│   ├── chat.py                 # Chat request/response schemas
+│   ├── chat_integration.py     # Integration specific schemas
+│   └── session.py              # Session management schemas
+├── services/                   # Business Logic Layer (Orchestration)
+│   ├── ai_orchestrator.py      # Coordinates LLM turns & tool execution
+│   ├── auth_service.py         # Identity & Access logic
+│   ├── chat_integration_service.py # Integration pipeline handler
+│   ├── chat_service.py         # Core message lifecycle orchestrator
+│   ├── event_service.py        # External data access logic
+│   ├── idempotency_service.py  # Request deduplication logic
+│   ├── message_service.py      # Message persistence logic
+│   └── session_service.py      # Session CRUD & history logic
+└── workers/                    # Background Processing (arq/celery)
+    ├── arq_jobs.py             # Job definitions
+    ├── summarization_worker.py # Context compression logic
+    └── sync_worker.py          # Data synchronization logic

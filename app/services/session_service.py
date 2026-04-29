@@ -1,59 +1,104 @@
-import uuid
-from typing import List, Optional
-from app.repositories.session_repo import SessionRepository
-from app.schemas.session import SessionCreate, SessionUpdate, SessionRead
-from app.services.memory_service import MemoryService
+from __future__ import annotations
+
 import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from app.core.exceptions import SessionNotFoundException
+from app.repositories.session_repo import SessionRepository
+from app.repositories.message_repo import MessageRepository
+from app.schemas.session import SessionCreate, SessionRead, SessionUpdate
+from app.schemas.chat_unified import ChatHistoryResponse
+from app.ai.memory_manager import MemoryManager, SessionContext
 
 logger = logging.getLogger(__name__)
 
+
 class SessionService:
-    def __init__(self, session_repo: SessionRepository, memory_service: MemoryService):
+    """
+    Manages chat sessions, including persistence in DB and sync with Redis memory.
+    """
+    def __init__(self, session_repo: SessionRepository, message_repo: MessageRepository, memory: MemoryManager):
         self.session_repo = session_repo
-        self.memory_service = memory_service
+        self.message_repo = message_repo
+        self.memory = memory
 
-    async def create_session(self, session_in: SessionCreate, user_id: uuid.UUID) -> SessionRead:
-        obj_in = session_in.model_dump()
-        obj_in["user_id"] = user_id
-        db_obj = await self.session_repo.create(obj_in)
-        return SessionRead.model_validate(db_obj)
+    async def get_or_create_session(self, session_id: uuid.UUID | None, user_id: uuid.UUID) -> Any:
+        """Ensures a session exists and is initialized in memory."""
+        if session_id:
+            session = await self.get_session_model_for_user(session_id, user_id)
+        else:
+            session = await self.create_session(SessionCreate(title="New Chat"), user_id)
+            return session # create_session already handles memory sync
 
-    async def get_user_sessions(self, user_id: uuid.UUID, skip: int = 0, limit: int = 100) -> List[SessionRead]:
-        db_objs = await self.session_repo.get_user_sessions(user_id=user_id, skip=skip, limit=limit)
-        return [SessionRead.model_validate(obj) for obj in db_objs]
-
-    async def get_session(self, session_id: uuid.UUID) -> Optional[SessionRead]:
-        db_obj = await self.session_repo.get(session_id)
-        if not db_obj:
-            return None
-        return SessionRead.model_validate(db_obj)
-
-    async def get_session_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> SessionRead:
-        from fastapi import HTTPException, status
-        session = await self.get_session(session_id)
-        if not session or session.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or not accessible.")
+        # Sync with Redis memory if needed
+        existing_ctx = await self.memory.load_context(str(session.session_id))
+        if not existing_ctx:
+            context = SessionContext(
+                session_id=str(session.session_id),
+                user_id=str(session.user_id),
+                channel=session.channel or "web",
+                current_intent=session.current_intent or "",
+                current_summary=session.current_summary or "",
+            )
+            await self.memory.save_context(str(session.session_id), context)
+            
         return session
 
-    async def update_session(self, session_id: uuid.UUID, session_in: SessionUpdate) -> Optional[SessionRead]:
-        db_obj = await self.session_repo.get(session_id)
-        if not db_obj:
-            return None
-        updated_obj = await self.session_repo.update(db_obj, session_in.model_dump(exclude_unset=True))
-        return SessionRead.model_validate(updated_obj)
+    async def create_session(self, session_in: SessionCreate, user_id: uuid.UUID) -> Any:
+        """Creates a new session in DB and initializes memory."""
+        session = await self.session_repo.create({
+            "user_id": user_id,
+            "title": session_in.title,
+            "channel": session_in.channel or "web",
+            "model_setting_id": session_in.model_setting_id
+        })
+        context = SessionContext(
+            session_id=str(session.session_id),
+            user_id=str(session.user_id),
+            channel=session.channel or "web",
+            system_prompt=session_in.system_prompt or ""
+        )
+        await self.memory.save_context(str(session.session_id), context)
+        return session
+
+    async def get_session_model_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Any:
+        """Fetches a session and validates ownership."""
+        session = await self.session_repo.get_owned_session(session_id, user_id)
+        if not session:
+            raise SessionNotFoundException("Session not found or inaccessible.")
+        return session
+
+    async def finalize_session(self, session_id: uuid.UUID, intent: str, summary: str | None = None):
+        """Updates session metadata in the database."""
+        session = await self.session_repo.get(session_id)
+        if not session: return
+        
+        updates = {
+            "last_active": datetime.now(timezone.utc),
+            "current_intent": intent
+        }
+        if summary:
+            updates["current_summary"] = summary
+            
+        await self.session_repo.update(session, updates)
+
+    async def get_session_history(self, session_id: uuid.UUID, user_id: uuid.UUID, skip: int = 0, limit: int = 100) -> ChatHistoryResponse:
+        """Fetches session metadata and paginated messages."""
+        session = await self.get_session_model_for_user(session_id, user_id)
+        messages = await self.message_repo.get_session_messages(session_id, skip=skip, limit=limit)
+        return ChatHistoryResponse(
+            session=SessionRead.model_validate(session),
+            messages=messages
+        )
+
+    async def get_user_sessions(self, user_id: uuid.UUID, skip: int = 0, limit: int = 100) -> list[SessionRead]:
+        sessions = await self.session_repo.get_user_sessions(user_id, skip, limit)
+        return [SessionRead.model_validate(s) for s in sessions]
 
     async def delete_session(self, session_id: uuid.UUID) -> bool:
-        """
-        Deletes a session from the persistent DB.
-        Ensures Redis is cleared regardless of DB failure.
-        """
         try:
-            # Delete from DB
-            deleted = await self.session_repo.delete(session_id)
-            return deleted
-        except Exception as e:
-            logger.error(f"Failed to delete session {session_id} from DB: {e}")
-            raise
+            return await self.session_repo.delete(session_id)
         finally:
-            # Clear Redis memory regardless of whether DB deletion succeeds or throws an exception.
-            await self.memory_service.end_session(str(session_id))
+            await self.memory.clear_session(str(session_id))

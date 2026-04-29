@@ -1,79 +1,119 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any
-from pydantic import BaseModel
 import uuid
-from app.schemas.message import ChatResponse
+from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_db, get_current_user
+from app.ai.intent_detector import IntentDetector
+from app.ai.intent_router import IntentRouter
+from app.ai.memory_manager import MemoryManager
+from app.ai.prompt_builder import PromptBuilder
+from app.ai.safety import ResponseValidator
+from app.api.v1.db_deps import get_chatbot_session
+from app.api.v1.auth_deps import get_current_user
+from app.core.auth_context import AuthContext, AuthMode
+from app.db.redis import get_redis
 from app.repositories.message_repo import MessageRepository
 from app.repositories.session_repo import SessionRepository
+from app.schemas.chat_unified import ChatHistoryResponse, ChatMessageRequest, ChatMessageResponse
+from app.schemas.session import SessionCreate, SessionRead
+from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
-from app.services.memory_service import MemoryService
-from app.services.llm_service import LLMService
 from app.services.session_service import SessionService
-from app.services.chat_orchestrator import ChatOrchestrator
-from app.ai.memory_manager import MemoryManager
-from app.db.redis import get_redis
+from app.services.ai_orchestrator import AIOrchestrator
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-class MessagePayload(BaseModel):
-    content: str
-    role: str
 
-class ChatRequest(BaseModel):
-    session_id: uuid.UUID
-    message: MessagePayload
-
-async def get_chat_deps(db: AsyncSession = Depends(get_db)):
-    """Yields both the SessionService to verify ownership, and the Orchestrator to execute Chat"""
+async def get_chat_dependencies(
+    request: Request,
+    chatbot_db: AsyncSession = Depends(get_chatbot_session),
+) -> dict:
     redis_client = await get_redis()
-    memory_manager = MemoryManager(redis_client)
-    memory_service = MemoryService(memory_manager)
-    
-    message_repo = MessageRepository(db)
+    memory = MemoryManager(redis_client)
+
+    # Repositories
+    session_repo = SessionRepository(chatbot_db)
+    message_repo = MessageRepository(chatbot_db)
+
+    # Services
     message_service = MessageService(message_repo)
-    
-    session_repo = SessionRepository(db)
-    session_service = SessionService(session_repo, memory_service)
-    
-    llm_service = LLMService(max_retries=2)
-    orchestrator = ChatOrchestrator(message_service, memory_service, llm_service)
-    
+    session_service = SessionService(session_repo, message_repo, memory)
+
+    # Handlers
+    response_generator = request.app.state.response_generator
+    intent_detector = IntentDetector(response_generator)
+    intent_router = IntentRouter(high_confidence_threshold=0.85, medium_confidence_threshold=0.6)
+
+    # AI Orchestrator
+    ai_orchestrator = AIOrchestrator(
+        response_generator=response_generator,
+        response_validator=ResponseValidator(),
+        tool_registry=request.app.state.tool_registry,
+        runtime_deps={},
+    )
+
+    # Core Chat Service
+    chat_service = ChatService(
+        ai_orchestrator=ai_orchestrator,
+        session_service=session_service,
+        message_service=message_service,
+        memory=memory,
+        intent_detector=intent_detector,
+        intent_router=intent_router,
+        prompt_builder=PromptBuilder(),
+    )
+
     return {
+        "chat_service": chat_service,
         "session_service": session_service,
-        "memory_service": memory_service,  # Needed for summarization trigger
-        "orchestrator": orchestrator
     }
 
-@router.post("", response_model=ChatResponse)
-async def send_message(
-    request: ChatRequest,
-    background_tasks: BackgroundTasks,
+
+@router.post("/session", response_model=SessionRead)
+async def create_chat_session(
+    request: SessionCreate,
     user_id: uuid.UUID = Depends(get_current_user),
-    deps: dict = Depends(get_chat_deps)
-) -> ChatResponse:
-    """
-    Core AI Chat Endpoint.
-    Takes user content, ensures session authorization, and executes the Orchestrator pipeline.
-    Dispatches Summarization to Background Process when signaled.
-    """
-    session_service: SessionService = deps["session_service"]
-    memory_service: MemoryService = deps["memory_service"]
-    orchestrator: ChatOrchestrator = deps["orchestrator"]
+    deps: dict = Depends(get_chat_dependencies),
+) -> SessionRead:
+    # Note: create_session logic is slightly different from get_or_create_session.
+    # We'll use the repository-based create since SessionCreate has more fields.
+    session_repo = deps["session_service"].session_repo
+    session = await session_repo.create({
+        "user_id": user_id,
+        "channel": request.channel,
+        "model_setting_id": request.model_setting_id,
+        "title": request.title,
+    })
+    # Initialize context
+    await deps["session_service"].memory.save_context(str(session.session_id), deps["session_service"].memory.load_context(str(session.session_id)) or None) # This is a bit simplified, but create usually doesn't need complex init
+    return SessionRead.model_validate(session)
 
-    # 1. Authorization: Verify session exists and is owned by the incoming JWT token.
 
-    session_id = request.session_id
-    session = await session_service.get_session_for_user(session_id, user_id)
-
-    # 2. Execution: Run Orchestrator
-    payload = await orchestrator.handle_user_message(session_id=session_id, content=request.message.content)
+@router.post("/message", response_model=ChatMessageResponse)
+async def send_chat_message(
+    request: ChatMessageRequest,
+    fastapi_req: Request,
+    response: Response,
+    user_id: uuid.UUID = Depends(get_current_user),
+    deps: dict = Depends(get_chat_dependencies),
+) -> ChatMessageResponse:
+    from app.core.rate_limiter import check_rate_limits
+    rl_result = await check_rate_limits(user_id=user_id, ip_address=fastapi_req.client.host, user_tier="free", endpoint="chat")
     
-    # 3. Post-Processing: Background tasks dispatching
-    # The payload cleanly indicates if we need to summarize
-    if payload.should_summarize:
-        background_tasks.add_task(memory_service.summarize_session, str(session_id))
+    response.headers["X-RateLimit-Limit"] = str(rl_result.limit)
+    response.headers["X-RateLimit-Remaining"] = str(rl_result.remaining)
+    response.headers["X-RateLimit-Reset"] = str(rl_result.reset_after)
+    
+    chat_service: ChatService = deps["chat_service"]
+    return await chat_service.send_message(user_id=user_id, request=request)
 
-    return payload
+
+@router.get("/history/{session_id}", response_model=ChatHistoryResponse)
+async def get_chat_history(
+    session_id: uuid.UUID,
+    skip: int = 0,
+    limit: int = 100,
+    user_id: uuid.UUID = Depends(get_current_user),
+    deps: dict = Depends(get_chat_dependencies),
+) -> ChatHistoryResponse:
+    session_service: SessionService = deps["session_service"]
+    return await session_service.get_session_history(session_id=session_id, user_id=user_id, skip=skip, limit=limit)

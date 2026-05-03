@@ -13,12 +13,18 @@ class RedisStateAdapter(StatePort):
     def __init__(self, redis: RedisClient):
         self.redis = redis
 
-    async def get_state(self, key: str) -> Dict[str, Any] | None:
+    async def get_state(self, key: str) -> Any | None:
         data = await self.redis.get(key)
         return json.loads(data) if data else None
 
-    async def set_state(self, key: str, value: Dict[str, Any], ttl: int | None = None) -> None:
-        await self.redis.set(key, json.dumps(value), ex=ttl)
+    async def set_state(self, key: str, value: Any, ttl: int | None = None) -> None:
+        await self.redis.set(key, json.dumps(value), ttl)
 
     async def delete_state(self, key: str) -> None:
         await self.redis.delete(key)
+
+    async def increment(self, key: str, ttl: int | None = None) -> int:
+        new_value = await self.redis.incr(key)
+        if ttl:
+            await self.redis.expire(key, ttl)
+        return new_value

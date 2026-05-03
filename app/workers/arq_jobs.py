@@ -1,4 +1,5 @@
 from __future__ import annotations
+import uuid
 
 try:
     from arq import Retry  # type: ignore

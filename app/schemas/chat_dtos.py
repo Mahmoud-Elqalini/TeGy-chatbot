@@ -1,7 +1,22 @@
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 from app.models.chatbot.message import MessageRole
+from app.core.config import settings
+
+
+class ChatContext(BaseModel):
+    """
+    Metadata and current state of a chat session.
+    """
+    system_prompt: str = ""
+    current_intent: str = ""
+    current_summary: str = ""
+    channel: str = "web"
+    model_name: str = Field(default=settings.GEMINI_MODEL)
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -9,7 +24,7 @@ class ChatDomainRequest:
     """Pure domain data for AI processing."""
     message: str
     history: List[Dict[str, Any]]
-    context: Dict[str, Any]
+    context: ChatContext
     role: str = "user"
 
 

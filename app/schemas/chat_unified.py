@@ -1,16 +1,13 @@
 import uuid
-from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.message_schema import ChatMessage, MessageRole
 
 
 # --- Enums ---
 
-class MessageRole(str, Enum):
-    user = "user"
-    assistant = "assistant"
-    agent = "agent"  # Unified/V2 role
-    system = "system"
-    tool = "tool"
+
 
 
 # --- Common Components ---
@@ -31,13 +28,6 @@ class ChatMessageMetadata(BaseModel):
 
 # --- Request Models ---
 
-class ChatMessageRequest(BaseModel):
-    """
-    Legacy V1 Request Model.
-    """
-    message: str = Field(min_length=1)
-    session_id: uuid.UUID | None = None
-    role: str = "user"
 
 
 class ChatIntegrationRequest(BaseModel):
@@ -60,15 +50,18 @@ class ChatIntegrationRequest(BaseModel):
         return data
 
 
-class ChatMessageRequestV2(BaseModel):
+class ChatMessageRequest(BaseModel):
     """
-    Unified V2 Request Model.
+    Main Chat Request Model.
+
+    - In USER mode (JWT auth): user_id is resolved from the token and ignored if sent.
+    - In INTEGRATION mode (API Key auth): user_id is required in the body.
     """
-    user_id: uuid.UUID | None = None
-    session_id: uuid.UUID | None = None
-    message: str = Field(min_length=1)
-    role: MessageRole = MessageRole.user
-    user_profile: UserProfile | None = None
+    user_id: uuid.UUID | None = Field(None, description="Required for INTEGRATION mode. Ignored for USER mode (resolved from JWT).")
+    session_id: uuid.UUID | None = Field(None, description="Existing session ID. If None, a new session is created.")
+    message: str = Field(min_length=1, max_length=5000, description="The user message content. Max 5000 characters.")
+    role: MessageRole = Field(MessageRole.user, description="Role of the message sender.")
+    user_profile: UserProfile | None = Field(None, description="Required on first message in INTEGRATION mode for new sessions.")
 
 
 # --- Response Models ---
@@ -99,6 +92,6 @@ class ChatHistoryResponse(BaseModel):
     Session History Model.
     """
     session_id: uuid.UUID
-    messages: list[dict]
+    messages: list[ChatMessage]
 
     model_config = ConfigDict(from_attributes=True)

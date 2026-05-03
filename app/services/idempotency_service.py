@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from app.db.redis import RedisClient
 
@@ -116,27 +115,5 @@ class IdempotencyService:
 
         await self.redis.delete(lock_key)
 
-    # -------------------------------------------------------------
-    # Wait for result (polling fallback)
-    # -------------------------------------------------------------
-    async def wait_for_result(self, idempotency_key: str) -> dict | None:
-        """
-        Poll Redis with exponential backoff in case request is still processing.
 
-        Attempts:
-            3 retries → [0.1s, 0.3s, 0.8s]
-
-        Returns:
-            Cached result if ready, otherwise None
-        """
-
-        for delay in [0.1, 0.3, 0.8]:
-            await asyncio.sleep(delay)
-
-            status, data = await self.check(idempotency_key)
-
-            if status == "hit":
-                return data
-
-        return None
         

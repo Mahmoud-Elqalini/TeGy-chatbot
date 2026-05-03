@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -8,21 +7,31 @@ from typing import Any
 from app.core.exceptions import SessionNotFoundException
 from app.repositories.session_repo import SessionRepository
 from app.repositories.message_repo import MessageRepository
-from app.schemas.session import SessionCreate, SessionRead, SessionUpdate
+from app.repositories.summary_repo import SummaryRepository
+from app.repositories.memory_repo import MemoryRepository
+from app.schemas.session import SessionCreate, SessionRead
 from app.schemas.chat_unified import ChatHistoryResponse
+from app.schemas.message_schema import ChatMessage
 from app.ai.memory_manager import MemoryManager, SessionContext
-
-logger = logging.getLogger(__name__)
 
 
 class SessionService:
     """
     Manages chat sessions, including persistence in DB and sync with Redis memory.
     """
-    def __init__(self, session_repo: SessionRepository, message_repo: MessageRepository, memory: MemoryManager):
+    def __init__(
+        self, 
+        session_repo: SessionRepository, 
+        message_repo: MessageRepository, 
+        memory: MemoryManager,
+        summary_repo: SummaryRepository | None = None,
+        memory_repo: MemoryRepository | None = None
+    ):
         self.session_repo = session_repo
         self.message_repo = message_repo
         self.memory = memory
+        self.summary_repo = summary_repo
+        self.memory_repo = memory_repo
 
     async def get_or_create_session(self, session_id: uuid.UUID | None, user_id: uuid.UUID) -> Any:
         """Ensures a session exists and is initialized in memory."""
@@ -70,7 +79,7 @@ class SessionService:
             raise SessionNotFoundException("Session not found or inaccessible.")
         return session
 
-    async def finalize_session(self, session_id: uuid.UUID, intent: str, summary: str | None = None):
+    async def finalize_session(self, session_id: uuid.UUID, intent: str, summary: str | dict | None = None):
         """Updates session metadata in the database."""
         session = await self.session_repo.get(session_id)
         if not session: return
@@ -79,18 +88,50 @@ class SessionService:
             "last_active": datetime.now(timezone.utc),
             "current_intent": intent
         }
-        if summary:
+        
+        # Handle if summary is a dictionary from the new AI summarizer
+        if isinstance(summary, dict):
+            await self.update_summarization_results(session_id, summary)
+            updates["current_summary"] = summary.get("session_summary")
+        elif summary:
             updates["current_summary"] = summary
             
         await self.session_repo.update(session, updates)
+
+    async def update_summarization_results(self, session_id: uuid.UUID, summary_data: dict):
+        """
+        Stores advanced summarization results into versioned conv_summaries
+        and session_memory tables.
+        """
+        if not self.summary_repo or not self.memory_repo:
+            return
+
+        # 1. Store Versioned Summary
+        latest_version = await self.summary_repo.get_latest_version(session_id)
+        await self.summary_repo.create({
+            "session_id": session_id,
+            "summary": summary_data.get("conv_summary") or summary_data.get("session_summary"),
+            "version": latest_version + 1
+        })
+
+        # 2. Store Key Points in Session Memory
+        key_points = summary_data.get("key_points", [])
+        for point in key_points:
+            await self.memory_repo.create({
+                "session_id": session_id,
+                "memory_type": "key_point",
+                "content": point,
+                "importance": 0.8
+            })
 
     async def get_session_history(self, session_id: uuid.UUID, user_id: uuid.UUID, skip: int = 0, limit: int = 100) -> ChatHistoryResponse:
         """Fetches session metadata and paginated messages."""
         session = await self.get_session_model_for_user(session_id, user_id)
         messages = await self.message_repo.get_session_messages(session_id, skip=skip, limit=limit)
+        typed_messages = [ChatMessage.model_validate(m) for m in messages]
         return ChatHistoryResponse(
-            session=SessionRead.model_validate(session),
-            messages=messages
+            session_id=session.session_id,
+            messages=typed_messages
         )
 
     async def get_user_sessions(self, user_id: uuid.UUID, skip: int = 0, limit: int = 100) -> list[SessionRead]:

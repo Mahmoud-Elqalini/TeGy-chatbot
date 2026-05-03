@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import traceback
 
 import google.generativeai as genai
 
@@ -26,9 +28,10 @@ class GeminiProvider(LLMProvider):
                 asyncio.to_thread(self._generate_blocking, request),
                 timeout=settings.GEMINI_READ_TIMEOUT_SECONDS,
             )
-        except TimeoutError as exc:
+        except asyncio.TimeoutError as exc:
             raise AITimeoutException("Timed out while waiting for Gemini response.") from exc
         except Exception as exc:
+            logger.error(f"Gemini provider exception: {type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}")
             error_name = type(exc).__name__
             if error_name in {"ResourceExhausted", "TooManyRequests", "ServiceUnavailable", "DeadlineExceeded"}:
                 raise AITransientException(f"Gemini transient or rate limit error: {error_name}") from exc
@@ -37,50 +40,89 @@ class GeminiProvider(LLMProvider):
     def _generate_blocking(self, request: LLMRequest) -> LLMResponse:
         model_name = request.model or settings.GEMINI_MODEL
         
+        # Ensure model name is formatted correctly for Vertex AI / Gemini API
+        # Some users might provide the full path or just the name
+        if not model_name.startswith("models/"):
+             target_model = f"models/{model_name}"
+        else:
+             target_model = model_name
+
+        logger.debug("gemini.generating", model=target_model)
+
         # Tools integration
         tools = None
         if request.metadata and "tools" in request.metadata:
             tools = request.metadata["tools"]
 
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            safety_settings=self.safety_guard.gemini_safety_settings(),
-            generation_config={"temperature": 0.3},
-            tools=tools
-        )
+        try:
+            model = genai.GenerativeModel(
+                model_name=target_model,
+                safety_settings=self.safety_guard.gemini_safety_settings(),
+                generation_config={"temperature": 0.3},
+                tools=tools
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Gemini with tools, falling back to no tools. Error: {e}")
+            model = genai.GenerativeModel(
+                model_name=target_model,
+                safety_settings=self.safety_guard.gemini_safety_settings(),
+                generation_config={"temperature": 0.3},
+                tools=None
+            )
         
         chat_history = []
         if request.system_prompt:
             chat_history.append({"role": "user", "parts": [request.system_prompt]})
             chat_history.append({"role": "model", "parts": ["Understood. I will follow the system instructions."]})
+        
         for message in request.history:
             role = "model" if message.get("role") == "assistant" else "user"
-            chat_history.append({"role": role, "parts": [message.get("content", "")]})
+            content = message.get("content", "")
+            if content:
+                chat_history.append({"role": role, "parts": [content]})
 
         chat = model.start_chat(history=chat_history)
         response = chat.send_message(request.user_input)
         
-        # Extraction
+        # Extraction with safety
         content = ""
         tool_calls = []
         
-        if response.candidates:
-            part = response.candidates[0].content.parts[0]
-            if fn := getattr(part, "function_call", None):
-                tool_calls.append({
-                    "id": getattr(response, "id", "unknown"), # Gemini doesn't always have ID per call like OpenAI
-                    "name": fn.name,
-                    "arguments": dict(fn.args)
-                })
+        try:
+            if response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    part = candidate.content.parts[0]
+                    if fn := getattr(part, "function_call", None):
+                        tool_calls.append({
+                            "id": "unknown",
+                            "name": fn.name,
+                            "arguments": dict(fn.args) if hasattr(fn, "args") else {}
+                        })
+                    else:
+                        # Safely get text, avoiding KeyError/ValueError if blocked
+                        try:
+                            content = response.text
+                        except (ValueError, IndexError, KeyError):
+                            if candidate.finish_reason != 1: # 1 is STOP
+                                 content = f"Response blocked or incomplete. Reason: {candidate.finish_reason}"
+                            else:
+                                 content = "No text content returned."
             else:
-                content = response.text
+                content = "No candidates returned from Gemini."
+        except Exception as e:
+            logger.error(f"Error extracting Gemini response: {e}")
+            content = f"Error processing response: {type(e).__name__}"
 
-        # Extract usage metadata
+        # Extract usage metadata safely
         prompt_tokens = 0
         completion_tokens = 0
-        if hasattr(response, "usage_metadata"):
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            completion_tokens = response.usage_metadata.candidates_token_count
+        try:
+            if hasattr(response, "usage_metadata"):
+                prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0)
+                completion_tokens = getattr(response.usage_metadata, "candidates_token_count", 0)
+        except Exception:
+            pass
 
         return LLMResponse(
             content=content,
@@ -90,11 +132,14 @@ class GeminiProvider(LLMProvider):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             tool_calls=tool_calls if tool_calls else None,
-            raw={"candidates": len(getattr(response, "candidates", []) or [])},
+            raw={"candidates": len(response.candidates) if hasattr(response, "candidates") else 0},
         )
 
     async def count_tokens(self, content: str, model: str | None = None) -> int:
         model_name = model or settings.GEMINI_MODEL
+        if not model_name.startswith("models/"):
+             model_name = f"models/{model_name}"
+             
         try:
             m = genai.GenerativeModel(model_name=model_name)
             response = await asyncio.to_thread(m.count_tokens, content)

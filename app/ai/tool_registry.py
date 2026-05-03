@@ -47,15 +47,37 @@ class ToolRegistry:
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """
         Returns a list of all registered tool definitions in a format the AI understands.
+        Sanitizes the schema types to uppercase for Gemini compatibility.
         """
-        return [
-            {
+        definitions = []
+        for tool in self._tools.values():
+            # Deep copy to avoid mutating the original tool definition
+            params = self._sanitize_schema(tool.parameters)
+            definitions.append({
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": params,
+            })
+        return definitions
+
+    def _sanitize_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Recursively sanitizes the JSON schema by uppercasing 'type' values."""
+        if not isinstance(schema, dict):
+            return schema
+            
+        new_schema = dict(schema)
+        if "type" in new_schema and isinstance(new_schema["type"], str):
+            new_schema["type"] = new_schema["type"].upper()
+            
+        if "properties" in new_schema and isinstance(new_schema["properties"], dict):
+            new_schema["properties"] = {
+                k: self._sanitize_schema(v) for k, v in new_schema["properties"].items()
             }
-            for tool in self._tools.values()
-        ]
+            
+        if "items" in new_schema and isinstance(new_schema["items"], dict):
+            new_schema["items"] = self._sanitize_schema(new_schema["items"])
+            
+        return new_schema
 
     def get_tool(self, name: str) -> ToolDefinition | None:
         """Finds a tool by its name."""

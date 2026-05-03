@@ -1,4 +1,6 @@
 from __future__ import annotations
+from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.core.exceptions import AITimeoutException, AITransientException, LLMUnavailableException
 
 import asyncio
 from app.core.observability import get_logger

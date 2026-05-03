@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     CHATBOT_API_KEY: str = ""
     CHATBOT_ALLOWED_IPS: list[str] = ["*"]
 
+    # CORS
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+
+    # API Versioning
+    API_VERSION: str = "1.0.0"
+
     DATABASE_URL: str | None = None
     MAIN_DATABASE_URL: str | None = None
     CHATBOT_DATABASE_URL: str | None = None
@@ -31,7 +37,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GEMINI_CONNECT_TIMEOUT_SECONDS: int = 5
     GEMINI_READ_TIMEOUT_SECONDS: int = 30
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-3-flash-preview"
 
     ARQ_QUEUE_NAME: str = "chatbot-jobs"
     ARQ_REDIS_SETTINGS_HOST: str | None = None
@@ -40,6 +46,11 @@ class Settings(BaseSettings):
     ARQ_REDIS_SETTINGS_PASSWORD: str | None = None
     ARQ_JOB_TIMEOUT_SECONDS: int = 120
     ARQ_MAX_RETRIES: int = 3
+
+    # Timeouts
+    AI_REQUEST_TIMEOUT: int = 15
+    REDIS_OPERATION_TIMEOUT: int = 3
+    DB_OPERATION_TIMEOUT: int = 5
 
     # Rate Limiting
     RATE_LIMIT_FREE: int = 5

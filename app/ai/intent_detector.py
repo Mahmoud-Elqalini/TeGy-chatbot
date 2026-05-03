@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import logging
 from typing import Any, TypedDict, Literal
 from app.core.observability import get_logger
 
@@ -157,9 +156,4 @@ class IntentDetector:
         except Exception:
             raise
 
-    def extract_event_reference(self, content: str) -> int | None:
-        """Utility to extract IDs from text."""
-        match = re.search(r"(?:event|id)\s*#?\s*(\d+)", content, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-        return None
+

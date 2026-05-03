@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.ai.memory_manager import SessionContext
+from app.schemas.chat_dtos import ChatContext
 
 
 class PromptBuilder:
-    def build_system_prompt(self, context: SessionContext, detected_intent: str | None = None) -> str:
+    def build_system_prompt(self, context: ChatContext, detected_intent: str | None = None) -> str:
         parts = [
             "You are an AI assistant for a ticket booking platform.",
             "The main booking platform remains the source of truth for transactional and financial operations.",

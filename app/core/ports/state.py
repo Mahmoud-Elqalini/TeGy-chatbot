@@ -9,16 +9,21 @@ class StatePort(ABC):
     """
 
     @abstractmethod
-    async def get_state(self, key: str) -> Dict[str, Any] | None:
+    async def get_state(self, key: str) -> Any | None:
         """Retrieves raw state by key."""
         pass
 
     @abstractmethod
-    async def set_state(self, key: str, value: Dict[str, Any], ttl: int | None = None) -> None:
+    async def set_state(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Persists raw state blob."""
         pass
 
     @abstractmethod
     async def delete_state(self, key: str) -> None:
         """Removes state."""
+        pass
+
+    @abstractmethod
+    async def increment(self, key: str, ttl: int | None = None) -> int:
+        """Atomsically increments a counter and returns the new value."""
         pass

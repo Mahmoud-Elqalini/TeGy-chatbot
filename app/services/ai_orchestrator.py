@@ -1,6 +1,7 @@
 from __future__ import annotations
+from app.core.config import settings
 
-import logging
+
 import time
 from typing import Any
 
@@ -8,7 +9,7 @@ from app.ai.providers.base import LLMRequest, LLMResponse
 from app.ai.response_generator import ResponseGenerator
 from app.ai.safety import ResponseValidator
 from app.ai.tool_registry import ToolRegistry
-from app.core.exceptions import LLMUnavailableException
+
 from app.core.observability import get_logger
 
 logger = get_logger(__name__)
@@ -108,11 +109,13 @@ class AIOrchestrator:
             
             try:
                 # Execute the tool and capture the result.
+                logger.info("tool.execution_started", tool_name=name, call_id=call_id)
                 result = await self.tool_registry.call_tool(
                     name,
                     runtime_deps=self.runtime_deps,
                     **args
                 )
+                logger.info("tool.execution_completed", tool_name=name, call_id=call_id, status="success")
                 results.append({
                     "tool_call_id": call_id,
                     "tool_name": name,
@@ -176,7 +179,7 @@ class AIOrchestrator:
     async def _execute_fast_path(self, user_input: str, intent: str) -> tuple[str, int, list[dict]]:
         """Optimized path for simple transactional intents."""
         request = LLMRequest(
-            model="gemini-2.0-flash", 
+            model=settings.GEMINI_MODEL, 
             system_prompt=f"Quick assistant. Intent: {intent}.",
             history=[], 
             user_input=user_input,

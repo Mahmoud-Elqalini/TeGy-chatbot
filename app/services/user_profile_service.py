@@ -20,4 +20,10 @@ class UserProfileService:
         """
         if not profile:
             return False
-        return await self.repo.upsert(user_id=user_id, profile=profile)
+        _, is_new = await self.repo.upsert(
+            user_id=user_id,
+            name=profile.name,
+            email=profile.email,
+            gender=profile.gender
+        )
+        return is_new

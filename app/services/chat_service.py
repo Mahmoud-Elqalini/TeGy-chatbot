@@ -3,6 +3,8 @@ import logging
 import time
 from typing import Any, Dict
 
+from app.core.observability import get_logger
+
 from app.ai.intent_detector import IntentDetector
 from app.ai.intent_router import IntentRouter
 from app.ai.prompt_builder import PromptBuilder
@@ -10,7 +12,7 @@ from app.models.chatbot.message import MessageRole
 from app.schemas.chat_dtos import ChatDomainRequest, ChatDomainResponse
 from app.services.ai_orchestrator import AIOrchestrator
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ChatService:
@@ -44,25 +46,30 @@ class ChatService:
         # 1. Intent & Routing
         intent_result = await self.intent_detector.detect_complex(domain_request.message)
         routing = self.intent_router.route(intent_result)
+        logger.info("chat.intent_detected", intent=routing["intent"], confidence=routing["confidence"], route=routing["route"])
         
         # 2. Construction
         system_prompt = self.prompt_builder.build_system_prompt(domain_request.context, routing["intent"])
         history_formatted = self.prompt_builder.build_history(domain_request.history)
 
         # 3. Generation
+        logger.info("chat.generation_started", intent=routing["intent"], route=routing["route"])
         content, ai_tokens, tools = await self.orchestrator.generate_complex(
             user_input=domain_request.message,
             intent=routing["intent"],
             payload={
                 "system_prompt": system_prompt,
                 "history": history_formatted,
-                "context": domain_request.context
+                "context": domain_request.context,
+                "model": domain_request.context.model_name
             },
-            session_id=None,
+            session_id=domain_request.context.session_id,
             route=routing["route"]
         )
 
         # 4. Result Construction (Agnostic Metadata)
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info("chat.generation_completed", latency_ms=latency_ms, ai_tokens=ai_tokens, tools_count=len(tools))
         return ChatDomainResponse(
             content=content,
             role=MessageRole.assistant,
@@ -71,5 +78,5 @@ class ChatService:
             route=routing["route"],
             ai_tokens=ai_tokens,
             tool_results=tools,
-            latency_ms=int((time.time() - start_time) * 1000)
+            latency_ms=latency_ms
         )

@@ -26,7 +26,7 @@ class RedisResilienceAdapter(ResiliencePort):
             
         if count >= threshold:
             # 🔴 Open the circuit for 60 seconds
-            await self.redis.set(circuit_key, "1", ex=60)
+            await self.redis.set(circuit_key, "1", 60)
             return True
         return False
 
@@ -40,4 +40,4 @@ class RedisResilienceAdapter(ResiliencePort):
         """Allows one request to pass through every 10 seconds when circuit is open."""
         probe_key = f"resilience:circuit:{service_name}:probe"
         # If we can set the probe key, it means we are allowed to probe
-        return await self.redis.set(probe_key, "1", ex=10, nx=True)
+        return await self.redis.set_nx(probe_key, "1", 10)

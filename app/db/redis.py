@@ -88,13 +88,7 @@ class RedisKeys:
     def summarize_lock(cls, session_id: str) -> str:
         return f"{cls.PREFIX}:session:{session_id}:summarizing"
 
-    @classmethod
-    def user_active_session(cls, user_id: str) -> str:
-        return f"{cls.PREFIX}:user:{user_id}:active_session"
 
-    @classmethod
-    def user_requests(cls, user_id: str) -> str:
-        return f"{cls.PREFIX}:user:{user_id}:requests"
 
 
 # ---------------------------------------------------------------------

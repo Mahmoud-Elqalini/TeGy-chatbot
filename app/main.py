@@ -1,5 +1,4 @@
 import logging
-import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +9,12 @@ from app.core.middleware import RequestContextMiddleware
 from app.core.observability import configure_logging
 from app.db.redis import close_redis
 from app.api.v1.routes import chat, health, sessions
-from app.api.v2.routes import chat_unified
 
 # Import core AI and service components
 from app.ai.providers.gemini_provider import GeminiProvider
 from app.ai.response_generator import ResponseGenerator
 from app.ai.tool_registry import ToolRegistry
-from app.services.event_service import EventService
+from app.ai.tools import discover_and_register
 
 # Configure the logging system based on the debug setting
 configure_logging(bool(settings.DEBUG))
@@ -39,54 +37,8 @@ async def lifespan(app: FastAPI):
     response_generator = ResponseGenerator(gemini_provider)
     tool_registry = ToolRegistry()
     
-    # 2. Register Mock Tools
-    # These tools allow the AI to "do things" like fetching events or user profiles.
-    # We register them here once at startup so the AI knows how to use them.
-
-    @tool_registry.register(
-        name="get_events",
-        description="Get a list of available events from the database.",
-        parameters={"type": "object", "properties": {}}
-    )
-    async def get_events(**kwargs):
-        """Mock function to simulate fetching events."""
-        return [
-            {"id": 1, "name": "Tech Conference 2026", "date": "2026-05-15", "location": "Cairo"},
-            {"id": 2, "name": "AI Summit", "date": "2026-06-20", "location": "Dubai"}
-        ]
-
-    @tool_registry.register(
-        name="get_user_profile",
-        description="Fetch the current user's profile and settings.",
-        parameters={"type": "object", "properties": {}}
-    )
-    async def get_user_profile(user_id: str | uuid.UUID = "00000000-0000-0000-0000-000000000001", **kwargs):
-        """Mock function to simulate getting user data."""
-        return {"user_id": str(user_id), "name": "Mock User", "preferences": ["Technology", "AI"]}
-
-    @tool_registry.register(
-        name="create_ticket",
-        description="Book a ticket for a specific event.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "event_id": {"type": "integer", "description": "The unique ID of the event to book."}
-            },
-            "required": ["event_id"]
-        }
-    )
-    async def create_ticket(event_id: int, **kwargs):
-        """Mock function to simulate ticket creation."""
-        return {"status": "success", "ticket_id": f"TKT-{event_id}-999", "event_id": event_id}
-
-    @tool_registry.register(
-        name="search_orders",
-        description="Find all past orders made by the user.",
-        parameters={"type": "object", "properties": {}}
-    )
-    async def search_orders(user_id: str | uuid.UUID = "00000000-0000-0000-0000-000000000001", **kwargs):
-        """Mock function to simulate order search."""
-        return [{"order_id": 101, "event_id": 1, "status": "confirmed", "amount": 150.0}]
+    # 2. Auto-discover and register all tools from app/ai/tools/
+    discover_and_register(tool_registry)
     
     # 3. Save initialized objects to app state
     # This makes them accessible in any route handler via `request.app.state`.
@@ -102,12 +54,20 @@ async def lifespan(app: FastAPI):
     await close_redis()
     logger.info("Shutdown complete.")
 
+# OpenAPI Tags for API documentation
+openapi_tags = [
+    {"name": "Chat", "description": "Chat messaging endpoints"},
+    {"name": "Sessions", "description": "Session management endpoints"},
+    {"name": "System", "description": "Health checks and system status"},
+]
+
 # Initialize the FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    version="1.0.0",
+    version=settings.API_VERSION,
     description="Enterprise API Gateway for AI Chatbot System",
     lifespan=lifespan,
+    openapi_tags=openapi_tags,
     # Only show API documentation in debug mode for security
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url=None,
@@ -118,7 +78,7 @@ app.logger = logger
 # This allows browsers to communicate with the API from different domains.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -131,7 +91,6 @@ app.add_middleware(RequestContextMiddleware)
 register_exception_handlers(app)
 
 # Include API routes from different modules
-app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
-app.include_router(chat_unified.router, prefix="/api/v2")

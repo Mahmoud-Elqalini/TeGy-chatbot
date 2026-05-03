@@ -25,7 +25,7 @@ class RedisLockAdapter(LockPort):
         token = str(uuid.uuid4())
         lock_key = f"lock:session:{key}:processing"
         
-        success = await self.redis.set(lock_key, token, ex=ttl, nx=True)
+        success = await self.redis.set_nx(lock_key, token, ttl)
         return token if success else None
 
     async def release(self, key: str, token: str) -> bool:

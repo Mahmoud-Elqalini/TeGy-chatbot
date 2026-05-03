@@ -79,3 +79,8 @@ class AITransientException(AIException):
 class LLMUnavailableException(AIException):
     def __init__(self, detail: str = "LLM unreachable or exhausted retries"):
         super().__init__(detail, "LLM_UNAVAILABLE")
+
+
+class DatabaseException(AppException):
+    def __init__(self, detail: str = "Database operation failed"):
+        super().__init__(500, detail, "DATABASE_ERROR")

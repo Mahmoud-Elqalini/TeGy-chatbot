@@ -5,9 +5,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.redis import RedisClient, RedisKeys
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class SessionContext(BaseModel):
     channel: str = "web"
     current_intent: str = ""
     current_summary: str = ""
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = Field(default=settings.GEMINI_MODEL)
     system_prompt: str = ""
     updated_at: str = ""
     version: int = 0
@@ -61,7 +62,7 @@ class SessionContext(BaseModel):
             channel=data.get("channel", "web"),
             current_intent=data.get("current_intent", ""),
             current_summary=data.get("current_summary", ""),
-            model_name=data.get("model_name", "gemini-2.0-flash"),
+            model_name=data.get("model_name") or settings.GEMINI_MODEL,
             system_prompt=data.get("system_prompt", ""),
             updated_at=data.get("updated_at", ""),
             version=int(data.get("version", 0)),

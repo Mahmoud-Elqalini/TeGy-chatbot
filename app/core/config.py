@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # API Versioning
     API_VERSION: str = "1.0.0"
 
+    # External Services
+    SEMANTIC_SEARCH_API_URL: str = "http://138.197.63.199:8000/search"
+
     DATABASE_URL: str | None = None
     MAIN_DATABASE_URL: str | None = None
     CHATBOT_DATABASE_URL: str | None = None
@@ -72,14 +75,10 @@ class Settings(BaseSettings):
         Always wait for tool result before responding to user.
 
         ### 1. search_events
-        Use when: user wants to discover or search for events.
+        Use when: user wants to discover, browse, or get recommendations for events.
         Parameters:
-        - category: string — e.g. concert, sports, conference, workshop, festival
-        - location: string — city name or "online"
-        - date_from: string — ISO date YYYY-MM-DD (optional)
-        - date_to: string — ISO date YYYY-MM-DD (optional)
-        - price_max: number — max ticket price in EGP (optional)
-        - limit: number — max results to return, default 4
+        - q: string — Search query reflecting the user's intent (e.g. 'cairo music events this weekend', 'sports events under 500 EGP')
+        - limit: number — max results to return, default 8
 
         ### 2. get_event_details
         Use when: user selects a specific event or asks for more info about it.

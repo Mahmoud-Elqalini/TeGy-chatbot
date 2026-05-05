@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Header, Request, Response, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.db_deps import get_chatbot_session
+from app.api.v1.db_deps import get_chatbot_session, get_main_session
 from app.api.v1.auth_deps import get_auth_context, get_current_user
 from app.core.container import ServiceContainer
 from app.schemas.chat_unified import (
@@ -22,10 +22,11 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 
 async def get_chat_application_service(
     request: Request,
-    db: AsyncSession = Depends(get_chatbot_session)
+    db: AsyncSession = Depends(get_chatbot_session),
+    main_db: AsyncSession = Depends(get_main_session)
 ) -> ChatApplicationService:
     """Delegates assembly to the ServiceContainer."""
-    return await ServiceContainer.build_chat_application_service(request, db)
+    return await ServiceContainer.build_chat_application_service(request, db, main_db)
 
 
 async def get_session_service(

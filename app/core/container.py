@@ -55,6 +55,7 @@ class ServiceContainer:
     async def build_chat_application_service(
         request: Request,
         db: AsyncSession,
+        main_db: AsyncSession,
     ) -> ChatApplicationService:
         """Fully-wired ChatApplicationService for the chat pipeline."""
         redis = await get_redis()  # Single resolution for entire graph
@@ -81,6 +82,7 @@ class ServiceContainer:
             request.app.state.response_generator,
             ResponseValidator(),
             request.app.state.tool_registry,
+            runtime_deps={"main_db": main_db}
         )
         chat_domain = ChatService(
             ai_orchestrator=ai_orchestrator,

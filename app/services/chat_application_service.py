@@ -182,9 +182,10 @@ class ChatApplicationService:
             await self.lock.release(session_key, lock_token)
 
     def _build_api_response(self, ctx: WorkflowContext, res: ChatDomainResponse) -> ChatIntegrationResponse | ChatMessageResponse:
+        content = res.content or "عذراً، لم أستطع العثور على رد مناسب حالياً. يرجى المحاولة مرة أخرى."
         if ctx.auth_mode == "INTEGRATION":
-            return ChatIntegrationResponse(response=res.content, session_id=ctx.session_id, is_new_user=ctx.is_new_user)
+            return ChatIntegrationResponse(response=content, session_id=ctx.session_id, is_new_user=ctx.is_new_user)
         return ChatMessageResponse(
-            session_id=ctx.session_id, reply=res.content, role=res.role,
+            session_id=ctx.session_id, reply=content, role=res.role,
             metadata=ChatMessageMetadata(tokens_used=res.ai_tokens, latency_ms=int((time.time() - ctx.start_time) * 1000))
         )

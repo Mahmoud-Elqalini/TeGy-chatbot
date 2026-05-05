@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.models.chatbot.base import ChatbotBase
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class Session(ChatbotBase):
     status: Mapped[SessionStatus] = mapped_column(SQLEnum(SessionStatus, native_enum=False), default=SessionStatus.active, server_default="active")
     current_intent: Mapped[str | None] = mapped_column(String(255))
     current_summary: Mapped[str | None] = mapped_column(Text)
-    system_prompt: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text, default=settings.DEFAULT_SYSTEM_PROMPT)
     last_active: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

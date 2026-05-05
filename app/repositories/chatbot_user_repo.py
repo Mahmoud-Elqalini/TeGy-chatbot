@@ -23,52 +23,37 @@ class ChatbotUserRepository:
     ) -> tuple[ChatbotUser, bool]:
         try:
             user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-            user = await self.db.get(ChatbotUser, user_uuid)
-
-            # -------------------------
-            # USER EXISTS → UPDATE ONLY IF CHANGED
-            # -------------------------
-            if user is not None:
-                changed = False
-
-                if user.name != name:
-                    user.name = name
-                    changed = True
-
-                if user.email != email:
-                    user.email = email
-                    changed = True
-
-                if user.gender != gender:
-                    user.gender = gender
-                    changed = True
-
-                if changed:
-                    user.updated_at = datetime.now(timezone.utc)
-                    await self.db.flush()
-                    await self.db.refresh(user)
-
-                return user, False
-
-            # -------------------------
-            # USER NOT FOUND → INSERT
-            # -------------------------
             now = datetime.now(timezone.utc)
 
-            user = ChatbotUser(
+            # Use PostgreSQL-specific ON CONFLICT for atomic upsert
+            from sqlalchemy.dialects.postgresql import insert
+            
+            stmt = insert(ChatbotUser).values(
                 user_id=user_uuid,
                 name=name,
                 email=email,
                 gender=gender,
                 created_at=now,
-                updated_at=now,
-            )
-            self.db.add(user)
-            await self.db.flush()
-            await self.db.refresh(user)
-            return user, True
+                updated_at=now
+            ).on_conflict_do_update(
+                index_elements=["user_id"],
+                set_={
+                    "name": name,
+                    "email": email,
+                    "gender": gender,
+                    "updated_at": now
+                }
+            ).returning(ChatbotUser)
+
+            result = await self.db.execute(stmt)
+            user = result.scalar_one()
+            
+            # Note: returns True if created_at == updated_at (approximate for 'is_new')
+            return user, (user.created_at == user.updated_at)
 
         except Exception as exc:
             await self.db.rollback()
-            raise DatabaseException("Failed to upsert chatbot user") from exc
+            from app.core.observability import get_logger
+            get_logger(__name__).error(f"Upsert failed: {exc}")
+            raise DatabaseException(f"Failed to upsert chatbot user: {exc}") from exc
         

@@ -8,7 +8,6 @@ class SessionCreate(BaseModel):
     channel: str | None = Field(default="web", max_length=50)
     model_setting_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=150)
-    system_prompt: str | None = Field(default=None, max_length=2000)
 
 
 class SessionUpdate(BaseModel):
@@ -25,14 +24,8 @@ class SessionUpdate(BaseModel):
 
 class SessionRead(BaseModel):
     session_id: uuid.UUID
-    model_setting_id: uuid.UUID | None = None
-    title: str | None = None
-    channel: str | None = None
     status: str
-    current_intent: str | None = None
-    current_summary: str | None = None
     created_at: datetime
-    last_active: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

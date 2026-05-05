@@ -36,6 +36,7 @@ class IntentDetector:
     }
     SUPPORT_HINTS = {"support", "help", "problem", "issue", "cancel", "assistant", "manager", "representative"}
     BOOKING_HINTS = {"ticket", "booking", "reserve", "seat", "buy", "purchase", "order", "reservation", "confirm"}
+    GREETING_HINTS = {"hi", "hello", "hey", "hola", "هاي", "سلام", "اهلا", "مرحبا", "صباح", "مساء"}
 
     def __init__(self, response_generator: Any | None = None):
         """
@@ -78,6 +79,10 @@ class IntentDetector:
         if tokens & self.BOOKING_HINTS:
             confidence = 0.9 if any(p in normalized for p in ["book a ticket", "buy a ticket", "reserve a seat"]) else 0.85
             return "booking", confidence
+
+        # Check for Greeting Hints
+        if tokens & self.GREETING_HINTS:
+            return "general", 0.95
 
         # Default fallback
         return "general", 0.2

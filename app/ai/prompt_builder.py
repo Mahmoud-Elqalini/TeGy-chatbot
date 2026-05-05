@@ -7,13 +7,15 @@ from app.schemas.chat_dtos import ChatContext
 
 class PromptBuilder:
     def build_system_prompt(self, context: ChatContext, detected_intent: str | None = None) -> str:
-        parts = [
-            "You are an AI assistant for a ticket booking platform.",
-            "The main booking platform remains the source of truth for transactional and financial operations.",
-            "Use the chatbot database only as context and projection data.",
-        ]
+        parts = []
         if context.system_prompt:
             parts.append(context.system_prompt)
+            
+        parts.append(
+            "--- SYSTEM ARCHITECTURE CONSTRAINTS ---\n"
+            "The main booking platform remains the source of truth for transactional and financial operations. "
+            "Use the chatbot database only as context and projection data."
+        )
         if context.current_summary:
             parts.append(f"Conversation summary:\n{context.current_summary}")
         if context.current_intent:

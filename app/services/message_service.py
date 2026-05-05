@@ -39,6 +39,10 @@ class MessageService:
         )
         return MessageRead.model_validate(db_obj)
 
+    async def get_session_history(self, session_id: str | uuid.UUID, limit: int = 100) -> list:
+        return await self.message_repo.get_session_messages(session_id, limit=limit)
+
+
 
 
     @staticmethod

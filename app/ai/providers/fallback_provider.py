@@ -95,7 +95,7 @@ class FallbackProvider(LLMProvider):
 
             except (AITransientException, AITimeoutException) as exc:
                 logger.warning(
-                    "fallback.provider_failed",
+                    f"fallback.provider_failed: {provider.provider_name} | Error: {str(exc)}",
                     extra={
                         "provider": provider.provider_name,
                         "error": str(exc),

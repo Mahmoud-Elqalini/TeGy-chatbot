@@ -27,3 +27,13 @@ class StatePort(ABC):
     async def increment(self, key: str, ttl: int | None = None) -> int:
         """Atomsically increments a counter and returns the new value."""
         pass
+
+    @abstractmethod
+    async def decrement(self, key: str, amount: int) -> int:
+        """Atomically decrements a counter by amount."""
+        pass
+
+    @abstractmethod
+    async def set_nx(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        """Atomically sets a key if it does not exist (SETNX). Returns True if set."""
+        pass

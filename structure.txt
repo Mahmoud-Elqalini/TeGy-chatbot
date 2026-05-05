@@ -4,9 +4,12 @@ AI Chatbot Backend - Final Production Structure
 app/
 ├── main.py                     # Entry point (FastAPI initialization & lifespan)
 ├── ai/                         # Artificial Intelligence Core
-│   ├── providers/              # LLM Model Providers
+│   ├── providers/              # LLM Model Providers (Fallback Chain)
 │   │   ├── base.py             # Abstract base classes for LLMs
-│   │   └── gemini_provider.py  # Google Gemini implementation
+│   │   ├── gemini_provider.py  # Google Gemini (primary)
+│   │   ├── groq_provider.py    # Groq/Llama (1st fallback)
+│   │   ├── openrouter_provider.py # OpenRouter (2nd fallback)
+│   │   └── fallback_provider.py   # Auto-failover orchestrator
 │   ├── intent_detector.py      # Rule-based + LLM hybrid classifier
 │   ├── intent_router.py        # Decision layer (Routing: fast_path/llm_path)
 │   ├── memory_manager.py       # Redis-based session memory & lifecycle hooks

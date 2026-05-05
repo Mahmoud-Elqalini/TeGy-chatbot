@@ -25,3 +25,9 @@ class MessageRepository(BaseRepository[Message]):
         )
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def count_session_messages(self, session_id: str | uuid.UUID) -> int:
+        from sqlalchemy import func
+        query = select(func.count(self.model.message_id)).filter(self.model.session_id == session_id)
+        result = await self.db.execute(query)
+        return result.scalar_one()

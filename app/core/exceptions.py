@@ -40,6 +40,11 @@ class SessionNotFoundException(AppException):
         super().__init__(404, detail, "SESSION_NOT_FOUND")
 
 
+class ModelSettingsNotFoundException(AppException):
+    def __init__(self, detail: str = "Model settings not found"):
+        super().__init__(404, detail, "MODEL_SETTINGS_NOT_FOUND")
+
+
 class MessageNotFoundException(AppException):
     def __init__(self, detail: str = "Message not found"):
         super().__init__(404, detail, "MESSAGE_NOT_FOUND")

@@ -93,5 +93,8 @@ class ChatHistoryResponse(BaseModel):
     """
     session_id: uuid.UUID
     messages: list[ChatMessage]
+    total: int
+    skip: int
+    limit: int
 
     model_config = ConfigDict(from_attributes=True)

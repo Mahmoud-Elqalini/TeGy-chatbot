@@ -134,6 +134,9 @@ class RedisClient:
     async def incr(self, key: str) -> int:
         return await self._r.incr(key)
 
+    async def decrby(self, key: str, amount: int) -> int:
+        return await self._r.decrby(key, amount)
+
     # -------------------------------------------------------------
     # List operations (chat history use-case)
     # -------------------------------------------------------------

@@ -198,8 +198,10 @@ class MemoryManager:
         if intent:
             await self.update_context_fields(session_key, {"current_intent": intent})
 
-    async def build_llm_payload(self, session_id: str | Any, user_message: str, max_tokens: int = 3000) -> dict | None:
+    async def build_llm_payload(self, session_id: str | Any, user_message: str, max_tokens: int | None = None) -> dict | None:
         """Prepares the payload for the LLM."""
+        if max_tokens is None:
+            max_tokens = settings.AI_MAX_TOKENS
         session_key = str(session_id)
         context, messages = await self.load_session_state(session_key)
         if not context:

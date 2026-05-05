@@ -33,9 +33,9 @@ class ChatPersistenceService:
             metadata=metadata
         )
 
-    async def finalize_session(self, session_id: uuid.UUID, metadata: Dict[str, Any] | None = None) -> None:
+    async def finalize_session(self, session_id: uuid.UUID, metadata: Dict[str, Any] | None = None, version: int | None = None) -> None:
         """Finalizes session using metadata blob."""
         # Map metadata to expected fields if necessary, but keep service interface generic
         intent = metadata.get("intent", "unknown") if metadata else "unknown"
         summary = metadata.get("summary") if metadata else None
-        await self.session_service.finalize_session(session_id, intent, summary)
+        await self.session_service.finalize_session(session_id, intent, summary, version=version)

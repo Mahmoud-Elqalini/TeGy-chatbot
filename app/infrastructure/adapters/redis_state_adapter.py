@@ -28,3 +28,10 @@ class RedisStateAdapter(StatePort):
         if ttl:
             await self.redis.expire(key, ttl)
         return new_value
+
+    async def decrement(self, key: str, amount: int) -> int:
+        return await self.redis.decrby(key, amount)
+
+    async def set_nx(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        success = await self.redis.set_nx(key, json.dumps(value), ttl)
+        return success

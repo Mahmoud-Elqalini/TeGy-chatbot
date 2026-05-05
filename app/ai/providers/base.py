@@ -36,3 +36,7 @@ class LLMProvider(ABC):
     @abstractmethod
     async def count_tokens(self, content: str, model: str | None = None) -> int:
         raise NotImplementedError
+
+    async def close(self) -> None:
+        """Cleanup resources (httpx clients, etc.). Override if needed."""
+        pass

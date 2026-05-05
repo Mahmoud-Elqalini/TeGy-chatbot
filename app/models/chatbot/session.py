@@ -35,6 +35,7 @@ class Session(ChatbotBase):
     status: Mapped[SessionStatus] = mapped_column(SQLEnum(SessionStatus, native_enum=False), default=SessionStatus.active, server_default="active")
     current_intent: Mapped[str | None] = mapped_column(String(255))
     current_summary: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
     last_active: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

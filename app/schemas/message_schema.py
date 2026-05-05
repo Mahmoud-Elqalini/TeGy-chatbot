@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from enum import Enum
 
@@ -23,7 +23,7 @@ class ChatMessage(BaseModel):
     role: MessageRole
     content: str
     token_count: int = 0
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     sending_time: datetime
 
     model_config = ConfigDict(from_attributes=True)

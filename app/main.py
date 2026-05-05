@@ -12,9 +12,12 @@ from app.api.v1.routes import chat, health, sessions
 
 # Import core AI and service components
 from app.ai.providers.gemini_provider import GeminiProvider
+from app.ai.providers.fallback_provider import FallbackProvider
 from app.ai.response_generator import ResponseGenerator
 from app.ai.tool_registry import ToolRegistry
 from app.ai.tools import discover_and_register
+from arq import create_pool
+from app.workers.arq_jobs import get_arq_redis_settings
 
 # Configure the logging system based on the debug setting
 configure_logging(bool(settings.DEBUG))
@@ -31,26 +34,55 @@ async def lifespan(app: FastAPI):
     
     # --- Initialization Phase ---
     
-    # 1. Initialize core AI service singletons
-    # These will be shared across the entire application for efficiency.
-    gemini_provider = GeminiProvider() 
-    response_generator = ResponseGenerator(gemini_provider)
+    # 1. Build the provider fallback chain: Gemini → Groq → OpenRouter
+    #    Only adds fallback providers if their API keys are configured.
+    providers = [GeminiProvider()]
+
+    if settings.GROQ_API_KEY:
+        from app.ai.providers.groq_provider import GroqProvider
+        providers.append(GroqProvider())
+        logger.info("Groq fallback provider registered")
+
+    if settings.OPENROUTER_API_KEY:
+        from app.ai.providers.openrouter_provider import OpenRouterProvider
+        providers.append(OpenRouterProvider())
+        logger.info("OpenRouter fallback provider registered")
+
+    # Wrap all providers in a FallbackProvider for automatic failover
+    primary_provider = FallbackProvider(providers) if len(providers) > 1 else providers[0]
+    logger.info(f"AI provider chain initialized: {[p.provider_name for p in providers]}")
+
+    # 2. Initialize response generator and tool registry
+    response_generator = ResponseGenerator(primary_provider)
     tool_registry = ToolRegistry()
     
-    # 2. Auto-discover and register all tools from app/ai/tools/
+    # 3. Auto-discover and register all tools from app/ai/tools/
     discover_and_register(tool_registry)
     
-    # 3. Save initialized objects to app state
+    # 4. Save initialized objects to app state
     # This makes them accessible in any route handler via `request.app.state`.
-    app.state.gemini_provider = gemini_provider
+    app.state.gemini_provider = primary_provider
     app.state.response_generator = response_generator
     app.state.tool_registry = tool_registry
+    app.state.arq_pool = await create_pool(get_arq_redis_settings())
     
     yield
     
     # --- Teardown Phase ---
     # This part runs when the server is shutting down.
     logger.info("Executing safe teardown procedures...")
+    
+    # Close AI provider resources (httpx clients, etc.)
+    await primary_provider.close()
+    
+    # Log final provider metrics for observability
+    if hasattr(primary_provider, "get_metrics_summary"):
+        for m in primary_provider.get_metrics_summary():
+            logger.info("provider.metrics.final", extra=m)
+            
+    if hasattr(app.state, "arq_pool"):
+        await app.state.arq_pool.close()
+    
     await close_redis()
     logger.info("Shutdown complete.")
 

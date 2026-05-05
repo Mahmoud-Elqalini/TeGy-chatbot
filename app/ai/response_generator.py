@@ -14,42 +14,24 @@ class ResponseGenerator:
     It includes retry logic to handle temporary failures from the AI provider.
     """
 
-    def __init__(self, provider: LLMProvider, max_retries: int = 2):
+    def __init__(self, provider: LLMProvider):
         """
-        Initializes the generator with a specific AI provider (like Gemini).
+        Initializes the generator with a specific AI provider (like Gemini or FallbackProvider).
         
         Args:
             provider: The specific AI model provider to use.
-            max_retries: How many times to try again if the AI fails temporarily.
         """
         self.provider = provider
-        self.max_retries = max_retries
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """
         Sends a request to the AI model and returns its response.
-        If the model is busy or times out, it will retry based on `max_retries`.
+        Resilience (retries and circuit breaking) is handled by the provider itself.
         """
-        attempts = 0
-        while attempts <= self.max_retries:
-            try:
-                # Ask the provider to generate the response.
-                return await self.provider.generate(request)
-            except (AITimeoutException, AITransientException) as exc:
-                # If a temporary error occurs, log it and try again after a short wait.
-                attempts += 1
-                logger.warning(
-                    "response-generator.retry provider=%s attempt=%s error=%s",
-                    self.provider.provider_name,
-                    attempts,
-                    exc,
-                )
-                if attempts <= self.max_retries:
-                    # Wait longer with each retry (exponential backoff).
-                    await asyncio.sleep(2 ** attempts)
-
-        # If all retries fail, raise an error.
-        raise LLMUnavailableException("LLM provider exhausted retries.")
+        try:
+            return await self.provider.generate(request)
+        except (AITimeoutException, AITransientException) as exc:
+            raise LLMUnavailableException(f"LLM provider unavailable: {exc}") from exc
 
     async def count_tokens(self, content: str, model: str | None = None) -> int:
         """

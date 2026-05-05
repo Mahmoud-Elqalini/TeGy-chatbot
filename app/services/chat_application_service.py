@@ -2,7 +2,8 @@ import uuid
 import logging
 import time
 import asyncio
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, BackgroundTasks
+from app.core.exceptions import AppException
 
 from app.core.config import settings
 
@@ -63,7 +64,7 @@ class ChatApplicationService:
         idempotency_key: str | None = None
     ) -> ChatIntegrationResponse | ChatMessageResponse:
         """
-        Discrete 6-Step Distributed Pipeline.
+        Discrete Distributed Pipeline.
         """
         request_id = str(uuid.uuid4())
         ctx = WorkflowContext(
@@ -73,17 +74,26 @@ class ChatApplicationService:
             start_time=time.time()
         )
 
-        # 🟡 Structured Logging
+        # 1. Broken Idempotency Fix: Check CACHE FIRST before anything else
+        if idempotency_key:
+            cached_response = await self.idempotency.get(idempotency_key)
+            if cached_response:
+                logger.info("idempotency_hit", extra={"request_id": request_id, "idempotency_key": idempotency_key})
+                if auth.mode == "INTEGRATION":
+                    return ChatIntegrationResponse.model_validate(cached_response)
+                return ChatMessageResponse.model_validate(cached_response)
+
+        # Structured Logging
         log_meta = {"request_id": request_id, "user_id": str(ctx.user_id), "session_id": str(api_request.session_id)}
         logger.info("pipeline_start", extra=log_meta)
 
-        # 0. Distributed Circuit Breaker Check 🔴
+        # 0. Distributed Circuit Breaker Check 
         if await self.resilience.is_circuit_open("ai_service"):
             if not await self.resilience.allow_probe("ai_service"):
                 logger.error("circuit_breaker_open", extra=log_meta)
                 raise HTTPException(status_code=503, detail="Service unavailable")
 
-        # 1. Acquire Atomic Safe Lock 🔴
+        # 1. Acquire Atomic Safe Lock
         session_key = str(api_request.session_id or ctx.user_id)
         lock_token = await self.lock.acquire(session_key, ttl=60)
         if not lock_token:
@@ -112,7 +122,7 @@ class ChatApplicationService:
             )
             logger.info("pipeline.step_completed", extra={**log_meta, "step": "save_input", "duration_ms": int((time.time() - step_start)*1000)})
             
-            # Step 4: Run Domain Execution with Distributed Resilience 🔴
+            # Step 4: Run Domain Execution (Resilience is managed by Provider Layer)
             step_start = time.time()
             context = payload.get("context") or ChatContext()
             context.session_id = str(ctx.session_id)
@@ -125,7 +135,8 @@ class ChatApplicationService:
                 role=api_request.role
             )
             
-            domain_res = await self._execute_domain_with_backoff(domain_req, log_meta)
+            # Direct call to Domain (No Nested Retries in Application Layer)
+            domain_res = await asyncio.wait_for(self.domain.generate_response(domain_req), timeout=settings.AI_REQUEST_TIMEOUT)
             logger.info("pipeline.step_completed", extra={**log_meta, "step": "domain_execution", "duration_ms": int((time.time() - step_start)*1000)})
 
             # Step 5: Save Output
@@ -139,66 +150,36 @@ class ChatApplicationService:
             )
             logger.info("pipeline.step_completed", extra={**log_meta, "step": "save_output", "duration_ms": int((time.time() - step_start)*1000)})
 
-            # Step 6: Finalize
+            # Step 6: Memory Persist & Background Summarization
             step_start = time.time()
             should_summarize, updated_history = await self.memory.persist_interaction(
                 ctx.session_id, api_request.message, domain_res.content, domain_res.intent
             )
             
-            summary_data = None
-            if should_summarize:
-                # Use the new advanced summarizer with the ALREADY UPDATED history
-                summary_data = await self.summarizer.summarize(
-                    messages=updated_history,
-                    previous_summary=session.current_summary
-                )
-                await self.memory.save_summary(ctx.session_id, summary_data.get("session_summary"))
-
-            await self.persistence.finalize_session(ctx.session_id, {"intent": domain_res.intent, "summary": summary_data})
+            # Fast Path: Finalize immediately
+            await self.persistence.finalize_session(ctx.session_id, {"intent": domain_res.intent, "summary": session.current_summary})
+            
             logger.info("pipeline.step_completed", extra={**log_meta, "step": "finalize", "duration_ms": int((time.time() - step_start)*1000)})
 
             # Response construction
             response = self._build_api_response(ctx, domain_res)
-            if ctx.idempotency_key:
-                await self.idempotency.save(ctx.idempotency_key, response.model_dump())
+            if idempotency_key:
+                await self.idempotency.save(idempotency_key, response.model_dump())
 
             logger.info("pipeline_success", extra={**log_meta, "latency_ms": int((time.time() - ctx.start_time)*1000)})
             return response
 
+        except (HTTPException, AppException) as e:
+            # Propagate domain and HTTP exceptions naturally
+            logger.warning("pipeline_domain_error", extra={**log_meta, "error": str(e)})
+            raise
         except Exception as e:
-            logger.error("pipeline_error", extra={**log_meta, "error": str(e), "error_type": type(e).__name__}, exc_info=True)
+            logger.error("pipeline_system_error", extra={**log_meta, "error": str(e), "error_type": type(e).__name__}, exc_info=True)
             raise HTTPException(status_code=500, detail="Service Failure")
         
         finally:
-            # 🔴 Truly Atomic Release (Lua)
+            # Truly Atomic Release (Lua)
             await self.lock.release(session_key, lock_token)
-
-    async def _execute_domain_with_backoff(self, req: ChatDomainRequest, meta: dict) -> ChatDomainResponse:
-        """Exponential Backoff + Distributed Failure Tracking 🔴."""
-        for attempt in range(3):
-            try:
-                # 🟠 Timeout: 10 seconds
-                res = await asyncio.wait_for(self.domain.generate_response(req), timeout=settings.AI_REQUEST_TIMEOUT)
-                
-                # 🟠 Reset failure count on success 🟠
-                await self.resilience.record_success("ai_service")
-                return res
-                
-            except (asyncio.TimeoutError, Exception) as e:
-                # 🔴 Record Distributed Failure
-                is_open = await self.resilience.record_failure("ai_service")
-                if is_open:
-                    logger.critical("circuit_breaker_triggered", extra=meta)
-                
-                if attempt == 2:
-                    logger.error("ai_exhausted_retries", extra=meta)
-                    raise
-                
-                wait_time = 0.5 * (2 ** attempt)
-                logger.warning(f"ai_retry_attempt_{attempt+1}", extra={**meta, "wait_time": wait_time})
-                await asyncio.sleep(wait_time)
-        
-        raise Exception("Execution unreachable")
 
     def _build_api_response(self, ctx: WorkflowContext, res: ChatDomainResponse) -> ChatIntegrationResponse | ChatMessageResponse:
         if ctx.auth_mode == "INTEGRATION":

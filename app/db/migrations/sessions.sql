@@ -14,6 +14,7 @@ CREATE TABLE sessions (
         CHECK (status IN ('active', 'closed', 'idle', 'archived')),
     current_intent   VARCHAR(255),
     current_summary  TEXT,
+    system_prompt    TEXT,
     last_active      TIMESTAMPTZ DEFAULT NOW(),
     created_at       TIMESTAMPTZ DEFAULT NOW(),
 

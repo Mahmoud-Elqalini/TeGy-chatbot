@@ -39,6 +39,31 @@ class Settings(BaseSettings):
     GEMINI_READ_TIMEOUT_SECONDS: int = 30
     GEMINI_MODEL: str = "gemini-3-flash-preview"
 
+    # Global AI Settings
+    AI_TEMPERATURE: float = 0.3
+    AI_MAX_TOKENS: int = 4096
+    DEFAULT_SYSTEM_PROMPT: str = "You are a helpful AI assistant."
+
+    # Resilience Settings
+    LLM_MAX_RETRIES: int = 2
+    LLM_RETRY_BASE_DELAY: float = 0.5
+    CIRCUIT_BREAKER_THRESHOLD: int = 5
+    CIRCUIT_BREAKER_COOLDOWN_SECONDS: int = 30
+    HTTP_MAX_CONNECTIONS: int = 10
+    HTTP_MAX_KEEPALIVE: int = 5
+
+    # Groq Fallback
+    GROQ_API_KEY: str = ""
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_TIMEOUT_SECONDS: int = 30
+
+    # OpenRouter Fallback
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "google/gemma-4-26b-a4b-it:free"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_TIMEOUT_SECONDS: int = 60
+
     ARQ_QUEUE_NAME: str = "chatbot-jobs"
     ARQ_REDIS_SETTINGS_HOST: str | None = None
     ARQ_REDIS_SETTINGS_PORT: int | None = None

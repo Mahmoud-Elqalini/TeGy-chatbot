@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import traceback
 
 import google.generativeai as genai
 
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.ai.safety import InputSafetyGuard
 from app.core.config import settings
 from app.core.exceptions import AITimeoutException, AITransientException
@@ -21,8 +23,35 @@ class GeminiProvider(LLMProvider):
     def __init__(self, safety_guard: InputSafetyGuard | None = None):
         self.safety_guard = safety_guard or InputSafetyGuard()
         genai.configure(api_key=settings.GEMINI_API_KEY)
+        # Resilience
+        self.circuit = ProviderCircuitBreaker(
+            "gemini", 
+            failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD, 
+            cooldown_seconds=settings.CIRCUIT_BREAKER_COOLDOWN_SECONDS
+        )
+        self.metrics = ProviderMetrics("gemini")
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
+        """Generate with retry + circuit breaker + metrics."""
+        start = time.perf_counter()
+        try:
+            response = await retry_with_backoff(
+                fn=lambda: self._single_attempt(request),
+                max_retries=settings.LLM_MAX_RETRIES,
+                base_delay=settings.LLM_RETRY_BASE_DELAY,
+                provider_name=self.provider_name,
+            )
+            latency = (time.perf_counter() - start) * 1000
+            self.circuit.record_success()
+            self.metrics.record_success(latency)
+            return response
+        except Exception as exc:
+            self.circuit.record_failure()
+            self.metrics.record_failure(str(exc))
+            raise
+
+    async def _single_attempt(self, request: LLMRequest) -> LLMResponse:
+        """Single generation attempt — called by retry_with_backoff."""
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(self._generate_blocking, request),
@@ -58,7 +87,7 @@ class GeminiProvider(LLMProvider):
             model = genai.GenerativeModel(
                 model_name=target_model,
                 safety_settings=self.safety_guard.gemini_safety_settings(),
-                generation_config={"temperature": 0.3},
+                generation_config={"temperature": settings.AI_TEMPERATURE},
                 tools=tools
             )
         except Exception as e:
@@ -66,7 +95,7 @@ class GeminiProvider(LLMProvider):
             model = genai.GenerativeModel(
                 model_name=target_model,
                 safety_settings=self.safety_guard.gemini_safety_settings(),
-                generation_config={"temperature": 0.3},
+                generation_config={"temperature": settings.AI_TEMPERATURE},
                 tools=None
             )
         

@@ -128,6 +128,13 @@ class Settings(BaseSettings):
         - If tool returns an error → apologize briefly and offer to try again
         - Never expose raw tool responses to the user — always reformat them
 
+        ### 🔍 History & Context Management
+        - You only have the last 5 messages in your direct memory.
+        - If the user refers to something earlier (e.g., "the event I mentioned before", "what was that price again?"), you MUST call 'get_conversation_history'.
+        - Do not guess or apologize for forgetting — just call the tool to "remember".
+        - Use this tool to maintain a consistent persona and context.
+
+
         ---
 
         ## 🗺️ Conversation Phases
@@ -285,6 +292,7 @@ class Settings(BaseSettings):
 
     # Timeouts
     AI_REQUEST_TIMEOUT: int = 45
+    CHAT_MAX_HISTORY: int = 5
     REDIS_OPERATION_TIMEOUT: int = 3
     DB_OPERATION_TIMEOUT: int = 5
 

@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 from typing import Any
-
+from app.core.config import settings
 from app.schemas.chat_dtos import ChatContext
-
 
 class PromptBuilder:
     def build_system_prompt(self, context: ChatContext, detected_intent: str | None = None) -> str:
-        parts = []
-        if context.system_prompt:
-            parts.append(context.system_prompt)
+        parts = [settings.DEFAULT_SYSTEM_PROMPT]
+
             
         parts.append(
             "--- SYSTEM ARCHITECTURE CONSTRAINTS ---\n"

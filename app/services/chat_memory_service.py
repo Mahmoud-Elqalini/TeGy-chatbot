@@ -1,6 +1,7 @@
 import uuid
 import json
 from typing import Any, Dict, List
+from app.core.config import settings
 from app.core.ports.state import StatePort
 from app.schemas.chat_dtos import ChatContext
 
@@ -41,11 +42,11 @@ class ChatMemoryService:
         history = await self.state.get_state(history_key)
         
         if history is not None:
-            return history[-self.MAX_HISTORY:]
+            return history[-settings.CHAT_MAX_HISTORY:]
             
         # Fallback to DB if Redis is empty/expired
         if self.messages:
-            db_messages = await self.messages.get_session_history(session_id, limit=self.MAX_HISTORY)
+            db_messages = await self.messages.get_session_history(session_id, limit=settings.CHAT_MAX_HISTORY)
             history = [{"role": m.role, "content": m.content} for m in db_messages]
             # Warm up cache
             await self.state.set_state(history_key, history, ttl=86400)
@@ -53,7 +54,7 @@ class ChatMemoryService:
             
         return []
 
-    MAX_HISTORY = 20
+
 
     async def persist_interaction(
         self, 

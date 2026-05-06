@@ -11,6 +11,9 @@ class LLMRequest:
     system_prompt: str
     history: list[dict[str, Any]]
     user_input: str
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | None = None  # none, auto, required
+    tool_results: list[dict[str, Any]] | None = None
     metadata: dict[str, Any] | None = None
 
 

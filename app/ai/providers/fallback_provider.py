@@ -38,55 +38,73 @@ class FallbackProvider(LLMProvider):
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         last_exception: Exception | None = None
-        skipped_count = 0
+        skipped_info = []
 
-        for provider in self.providers:
-            # Circuit breaker check — skip providers that are down
+        # 1. Health-Based Selection: Rank providers by real-time health score
+        # Providers with higher success rates and lower latency get priority.
+        ranked_providers = sorted(
+            self.providers,
+            key=lambda p: (
+                p.metrics.calculate_health_score(p.circuit) 
+                if hasattr(p, "metrics") and hasattr(p, "circuit") 
+                else 0.5
+            ),
+            reverse=True
+        )
+
+        for provider in ranked_providers:
             circuit = getattr(provider, "circuit", None)
+            metrics = getattr(provider, "metrics", None)
+            
+            # 2. Hard Gate: Circuit Breaker Check with detailed logging
             if circuit and not circuit.is_available():
-                logger.info(
-                    "fallback.circuit_open_skipping",
-                    extra={
-                        "provider": provider.provider_name,
-                        "circuit_state": circuit.state,
-                    }
-                )
-                skipped_count += 1
+                reason = f"OPEN (Reason: {circuit.failure_reason}, Fails: {circuit.failure_count})"
+                skipped_info.append(f"{provider.provider_name}: {reason}")
                 continue
+
+            # Check if health score is too low
+            if metrics and circuit:
+                score = metrics.calculate_health_score(circuit)
+                if score < 0.2: # Hard floor for quality
+                    skipped_info.append(f"{provider.provider_name}: Unhealthy (Score: {score})")
+                    continue
 
             try:
                 logger.info(
-                    "fallback.trying",
-                    extra={"provider": provider.provider_name}
+                    "fallback.trying", 
+                    extra={
+                        "provider": provider.provider_name,
+                        "health_score": metrics.calculate_health_score(circuit) if metrics and circuit else "N/A"
+                    }
                 )
 
-                # Each fallback provider uses its own default model
                 fallback_request = LLMRequest(
-                    model=None,
+                    model=None, # Default to provider's best model
                     system_prompt=request.system_prompt,
                     history=request.history,
                     user_input=request.user_input,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    tool_results=request.tool_results,
                     metadata=request.metadata,
                 )
 
-                # For the primary (first) provider, keep the original model
-                if provider == self.providers[0]:
+                # Only pass the requested model if this provider is the 'Primary' for that model
+                # or if it's the first attempt and the name matches.
+                if provider == self.providers[0] and request.model:
                     fallback_request.model = request.model
 
                 start = time.perf_counter()
                 response = await provider.generate(fallback_request)
                 latency_ms = (time.perf_counter() - start) * 1000
 
-                if provider != self.providers[0]:
-                    # Track fallback usage in metrics
-                    metrics = getattr(provider, "metrics", None)
-                    if metrics:
-                        metrics.fallback_count += 1
+                # Log successful recovery or backup usage
+                if provider != ranked_providers[0]:
                     logger.warning(
-                        "fallback.used_backup",
+                        "fallback.used_alternative",
                         extra={
                             "provider": provider.provider_name,
-                            "original_provider": self.providers[0].provider_name,
+                            "rank": ranked_providers.index(provider) + 1,
                             "latency_ms": round(latency_ms, 2),
                         }
                     )
@@ -94,11 +112,12 @@ class FallbackProvider(LLMProvider):
                 return response
 
             except (AITransientException, AITimeoutException) as exc:
+                error_msg = str(exc)
                 logger.warning(
-                    f"fallback.provider_failed: {provider.provider_name} | Error: {str(exc)}",
+                    f"fallback.provider_failed: {provider.provider_name} | Error: {error_msg}",
                     extra={
                         "provider": provider.provider_name,
-                        "error": str(exc),
+                        "error": error_msg,
                         "error_type": type(exc).__name__,
                     }
                 )
@@ -108,30 +127,26 @@ class FallbackProvider(LLMProvider):
             except Exception as exc:
                 logger.error(
                     "fallback.unexpected_error",
-                    extra={
-                        "provider": provider.provider_name,
-                        "error": str(exc),
-                    }
+                    extra={"provider": provider.provider_name, "error": str(exc)}
                 )
                 last_exception = exc
                 continue
 
-        # All providers exhausted
+        # 3. Exhaustion: All health-checked options failed
+        error_summary = " | ".join(skipped_info) if skipped_info else "None"
         raise LLMUnavailableException(
-            f"All {len(self.providers)} providers exhausted "
-            f"({skipped_count} skipped by circuit breaker). "
-            f"Last error: {last_exception}"
+            f"All {len(self.providers)} providers exhausted. "
+            f"Skipped status: {error_summary}. "
+            f"Last technical error: {last_exception}"
         )
 
     async def count_tokens(self, content: str, model: str | None = None) -> int:
-        """Use the primary provider for token counting, fallback to estimation."""
         try:
             return await self.providers[0].count_tokens(content, model)
         except Exception:
             return max(1, int(len(content.split()) * 1.3))
 
     async def close(self) -> None:
-        """Propagate close() to all sub-providers for graceful shutdown."""
         for provider in self.providers:
             try:
                 await provider.close()
@@ -139,9 +154,9 @@ class FallbackProvider(LLMProvider):
                 logger.warning(f"Error closing {provider.provider_name}: {exc}")
 
     def get_metrics_summary(self) -> list[dict]:
-        """Returns metrics from all providers that have them."""
         return [
             getattr(p, "metrics").summary()
             for p in self.providers
             if hasattr(p, "metrics")
         ]
+        

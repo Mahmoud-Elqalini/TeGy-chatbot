@@ -82,7 +82,7 @@ class ServiceContainer:
             request.app.state.response_generator,
             ResponseValidator(),
             request.app.state.tool_registry,
-            runtime_deps={"main_db": main_db}
+            runtime_deps={"main_db": main_db, "db": db}
         )
         chat_domain = ChatService(
             ai_orchestrator=ai_orchestrator,

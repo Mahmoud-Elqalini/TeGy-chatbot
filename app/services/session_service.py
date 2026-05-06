@@ -95,30 +95,8 @@ class SessionService:
         return session
 
     async def _resolve_system_prompt(self, session_in: SessionCreate) -> str:
-        """Resolves the system prompt with fallback logic."""
-        if session_in.system_prompt:
-            logger.info(
-                "system_prompt.resolved",
-                extra={"source": "request", "model_setting_id": str(session_in.model_setting_id) if session_in.model_setting_id else None}
-            )
-            return session_in.system_prompt
-
-        if session_in.model_setting_id:
-            model_setting = await self.model_settings_repo.get(session_in.model_setting_id)
-            if not model_setting:
-                raise ModelSettingsNotFoundException(f"Model settings {session_in.model_setting_id} not found")
-            
-            if model_setting.system_prompt:
-                logger.info(
-                    "system_prompt.resolved",
-                    extra={"source": "db", "model_setting_id": str(session_in.model_setting_id)}
-                )
-                return model_setting.system_prompt
-
-        logger.info(
-            "system_prompt.resolved",
-            extra={"source": "default", "model_setting_id": str(session_in.model_setting_id) if session_in.model_setting_id else None}
-        )
+        """Resolves the system prompt strictly from the global configuration."""
+        logger.info("system_prompt.resolved", extra={"source": "config_default"})
         return settings.DEFAULT_SYSTEM_PROMPT
 
     async def get_session_model_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Any:

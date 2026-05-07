@@ -1,62 +1,129 @@
-AI Chatbot Backend - Final Production Structure
-============================================
+TeGy Chatbot - Enterprise AI Backend (Hexagonal Architecture)
+=============================================================
 
 app/
-├── main.py                     # Entry point (FastAPI initialization & lifespan)
-├── ai/                         # Artificial Intelligence Core
-│   ├── providers/              # LLM Model Providers (Fallback Chain)
-│   │   ├── base.py             # Abstract base classes for LLMs
-│   │   ├── gemini_provider.py  # Google Gemini (primary)
-│   │   ├── groq_provider.py    # Groq/Llama (1st fallback)
-│   │   ├── openrouter_provider.py # OpenRouter (2nd fallback)
-│   │   └── fallback_provider.py   # Auto-failover orchestrator
-│   ├── intent_detector.py      # Rule-based + LLM hybrid classifier
-│   ├── intent_router.py        # Decision layer (Routing: fast_path/llm_path)
-│   ├── memory_manager.py       # Redis-based session memory & lifecycle hooks
-│   ├── prompt_builder.py       # Templates for System/History/User prompts
-│   ├── response_generator.py   # Token counting & simple/streaming generation
-│   ├── safety.py               # Input/Output validation & AI safety settings
-│   └── tool_registry.py        # Tool definition and dynamic execution
-├── api/                        # API Delivery Layer
-│   └── v1/
-│       ├── dependencies.py     # Shared DI (Auth, DB, Redis)
-│       └── routes/             # Endpoint Definitions
-│           ├── auth.py         # Authentication & User Management
-│           ├── chat.py         # Main Conversational Endpoints
-│           ├── chat_integration.py # External System Integration
-│           ├── health.py       # System Status & Monitoring
-│           └── sessions.py     # Chat Session CRUD
-├── core/                       # Infrastructure & Configuration
-│   ├── config.py               # Environment settings (Pydantic Settings)
-│   ├── exceptions.py           # Global exception definitions
-│   ├── observability.py        # Structured logging & monitoring
-│   └── rate_limiter.py         # Redis-based sliding window rate limiting
-├── db/                         # Database Access Layer
-│   ├── postgres.py             # SQLAlchemy Async engine & session
-│   └── redis.py                # Redis client & key management
-├── models/                     # Data Models (SQLAlchemy)
-│   └── chatbot/                # Chat-specific DB entities
-│       ├── message.py          # Chat message schema
-│       ├── session.py          # Session metadata schema
-│       └── user.py             # Chat user profile schema
-├── repositories/               # Data Access Patterns (CRUD)
-│   ├── chatbot_user_repo.py
-│   ├── message_repo.py
-│   └── session_repo.py
-├── schemas/                    # Pydantic Data Validation (DTOs)
-│   ├── chat.py                 # Chat request/response schemas
-│   ├── chat_integration.py     # Integration specific schemas
-│   └── session.py              # Session management schemas
-├── services/                   # Business Logic Layer (Orchestration)
-│   ├── ai_orchestrator.py      # Coordinates LLM turns & tool execution
-│   ├── auth_service.py         # Identity & Access logic
-│   ├── chat_integration_service.py # Integration pipeline handler
-│   ├── chat_service.py         # Core message lifecycle orchestrator
-│   ├── event_service.py        # External data access logic
-│   ├── idempotency_service.py  # Request deduplication logic
-│   ├── message_service.py      # Message persistence logic
-│   └── session_service.py      # Session CRUD & history logic
-└── workers/                    # Background Processing (arq/celery)
-    ├── arq_jobs.py             # Job definitions
-    ├── summarization_worker.py # Context compression logic
-    └── sync_worker.py          # Data synchronization logic
+├── main.py                             # FastAPI entry point, lifespan, DI wiring
+│
+├── ai/                                 # AI Domain Core
+│   ├── providers/                      # LLM Provider Adapters (Fallback Chain)
+│   │   ├── base.py                     # Abstract base class for all LLM providers
+│   │   ├── gemini_provider.py          # Google Gemini (primary provider)
+│   │   ├── groq_provider.py            # Groq/Llama (1st fallback)
+│   │   ├── openrouter_provider.py      # OpenRouter (2nd fallback)
+│   │   ├── fallback_provider.py        # Auto-failover orchestrator across providers
+│   │   └── resilience.py              # Retry, circuit-breaker, backoff logic
+│   ├── tools/                          # AI Function Calling Tools
+│   │   ├── __init__.py                 # Auto-discovery: scans & registers *_tools.py
+│   │   ├── event_tools.py              # Tools for fetching event data
+│   │   ├── history_tools.py            # Tools for chat history retrieval
+│   │   ├── order_tools.py              # Tools for order management
+│   │   ├── ticket_tools.py             # Tools for ticketing operations
+│   │   └── user_tools.py              # Tools for user profile data
+│   ├── intent_detector.py              # Rule-based + LLM hybrid query classifier
+│   ├── intent_router.py                # Routes to fast_path or full LLM path
+│   ├── memory_manager.py               # Conversation context & memory lifecycle
+│   ├── prompt_builder.py               # System/History/User prompt templates
+│   ├── response_generator.py           # LLM call wrapper & response handling
+│   ├── safety.py                       # Input/Output sanitization & safety guards
+│   ├── summarizer.py                   # Compresses long conversations to summaries
+│   └── tool_registry.py               # Tool registration & dynamic execution engine
+│
+├── api/                                # Presentation Layer (HTTP)
+│   ├── v1/                             # API Version 1 (Public)
+│   │   ├── auth_deps.py                # Auth dependency injection
+│   │   ├── db_deps.py                  # DB session dependency injection
+│   │   └── routes/
+│   │       ├── chat.py                 # POST /chat — main chat endpoint
+│   │       ├── sessions.py             # Session CRUD endpoints
+│   │       └── health.py              # GET /health — system status
+│   └── v2/                            # API Version 2 (Reserved/Internal)
+│
+├── core/                               # Cross-Cutting Concerns & Ports
+│   ├── ports/                          # Abstract Interfaces (Hexagonal Ports)
+│   │   ├── lock.py                     # Distributed lock port interface
+│   │   ├── resilience.py               # Circuit-breaker port interface
+│   │   ├── state.py                    # Session state port interface
+│   │   └── tokens.py                  # Token counting port interface
+│   ├── api_key_auth.py                 # API key authentication logic
+│   ├── auth_context.py                 # Request-scoped auth context holder
+│   ├── config.py                       # All env settings (Pydantic Settings)
+│   ├── container.py                    # Dependency Injection container (DI wiring)
+│   ├── exception_handlers.py           # Global FastAPI exception handlers
+│   ├── exceptions.py                   # Custom domain exception classes
+│   ├── middleware.py                   # Request context middleware
+│   ├── observability.py                # Structured logging (structlog)
+│   └── security.py                    # Security utilities (hashing, tokens)
+│
+├── db/                                 # Persistence Configuration
+│   ├── migrations/                     # Alembic DB migration files
+│   ├── baseline_schema.sql             # Baseline SQL schema definition
+│   ├── chatbot_database.py             # SQLAlchemy async engine (chatbot DB)
+│   ├── main_database.py                # SQLAlchemy async engine (main system DB)
+│   └── redis.py                       # Redis client, connection pool & key helpers
+│
+├── infrastructure/                     # Infrastructure Layer (Adapters)
+│   └── adapters/                       # Concrete implementations of Core Ports
+│       ├── ai_token_adapter.py         # Token counting adapter (implements tokens port)
+│       ├── redis_lock_adapter.py       # Distributed lock adapter (implements lock port)
+│       ├── redis_resilience_adapter.py # Circuit-breaker adapter (implements resilience port)
+│       └── redis_state_adapter.py     # Session state adapter (implements state port)
+│
+├── models/                             # Domain Entities (SQLAlchemy ORM)
+│   ├── chatbot/                        # Chatbot-owned database tables
+│   │   ├── base.py                     # Base declarative class for chatbot models
+│   │   ├── message.py                  # Chat message entity
+│   │   ├── model_settings.py           # Per-session AI model settings
+│   │   ├── session.py                  # Chat session entity
+│   │   ├── session_memory.py           # Structured session memory entity
+│   │   ├── session_summary.py          # Conversation summary entity
+│   │   └── user.py                    # Chatbot user profile entity
+│   └── main/                          # Main system database tables (read-only)
+│       ├── base.py                     # Base declarative class for main models
+│       ├── event.py                    # Event entity (from main system)
+│       └── user.py                    # External user entity (from main system)
+│
+├── repositories/                       # Data Access Layer (Repository Pattern)
+│   ├── main/
+│   │   └── event_repo.py              # Event data access (main DB)
+│   ├── base_repo.py                    # Generic async CRUD base repository
+│   ├── chatbot_user_repo.py            # Chatbot user persistence
+│   ├── memory_repo.py                  # Session memory persistence
+│   ├── message_repo.py                 # Chat message persistence
+│   ├── model_settings_repo.py          # Model settings persistence
+│   ├── session_repo.py                 # Session CRUD & history queries
+│   └── summary_repo.py                # Conversation summary persistence
+│
+├── schemas/                            # Data Transfer Objects (Pydantic)
+│   ├── chat_dtos.py                    # Core chat request/response schemas
+│   ├── chat_unified.py                 # Unified chat payload schemas
+│   ├── message.py                      # Message DTO schemas
+│   ├── message_schema.py               # Message validation schemas
+│   └── session.py                     # Session request/response schemas
+│
+├── services/                           # Application Layer (Use Cases)
+│   ├── ai_orchestrator.py              # Coordinates LLM turns, tools & fallback
+│   ├── chat_application_service.py     # Top-level chat use-case handler
+│   ├── chat_memory_service.py          # Memory read/write for chat context
+│   ├── chat_persistence_service.py     # Persists messages & session updates
+│   ├── chat_service.py                 # Core chat lifecycle orchestrator
+│   ├── idempotency_service.py          # Duplicate request detection & prevention
+│   ├── message_service.py              # Message creation & retrieval logic
+│   ├── semantic_search_service.py      # Semantic/vector search over history
+│   ├── session_service.py              # Session lifecycle & history management
+│   └── user_profile_service.py        # User profile sync & upsert logic
+│
+└── workers/                           # Background Processing (Arq)
+    ├── __init__.py
+    ├── arq_jobs.py                     # Job definitions & Arq Redis pool setup
+    └── summarization_worker.py        # Async worker: compresses chat history
+
+Root Files
+----------
+├── Dockerfile                          # Docker container configuration
+├── requirements.txt                    # Python package dependencies
+├── init_db.py                          # Database initialization script
+├── check_db.py                         # Database health check script
+├── test_e2e.py                         # End-to-end integration tests
+├── .env                                # Environment variables (not committed)
+├── .gitignore                          # Git ignore rules
+└── structure.txt                      # This file

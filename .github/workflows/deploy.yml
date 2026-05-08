@@ -51,7 +51,7 @@ jobs:
               --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-app:${{ github.sha }} \
               --set-env-vars \
                 ENV=production \
-                DEBUG=False \
+                DEBUG=True \
                 DATABASE_URL_CHATBOT="${{ secrets.DATABASE_URL_CHATBOT }}" \
                 SECRET_KEY="${{ secrets.SECRET_KEY }}" \
                 GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \

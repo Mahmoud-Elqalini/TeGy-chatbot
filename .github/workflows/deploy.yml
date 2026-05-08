@@ -34,12 +34,21 @@ jobs:
         uses: azure/CLI@v1
         with:
           inlineScript: |
+            # Ensure containerapp extension is up to date
+            az extension add --name containerapp --upgrade --yes
+
+            # 1. Update Ingress and Port settings
+            az containerapp ingress update \
+              --name chatbot-app \
+              --resource-group TeGy-chatbot \
+              --target-port 8000 \
+              --type external
+
+            # 2. Update Image and Environment Variables
             az containerapp update \
               --name chatbot-app \
               --resource-group TeGy-chatbot \
               --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-app:${{ github.sha }} \
-              --target-port 8000 \
-              --ingress external \
               --set-env-vars \
                 ENV=production \
                 DEBUG=False \

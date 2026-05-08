@@ -344,6 +344,20 @@ class Settings(BaseSettings):
         if self.MAIN_DATABASE_URL is None or self.CHATBOT_DATABASE_URL is None:
             raise ValueError("MAIN_DATABASE_URL and CHATBOT_DATABASE_URL must be configured, or provide legacy DATABASE_URL.")
 
+        # 4. Clean REDIS_HOST (Upstash sometimes provides URLs, but we need only the hostname)
+        if self.REDIS_HOST and isinstance(self.REDIS_HOST, str):
+            for prefix in ["https://", "http://", "redis://", "rediss://"]:
+                if self.REDIS_HOST.startswith(prefix):
+                    self.REDIS_HOST = self.REDIS_HOST.replace(prefix, "", 1)
+            # Remove trailing slashes or ports if they were included in the host string
+            if "/" in self.REDIS_HOST:
+                self.REDIS_HOST = self.REDIS_HOST.split("/")[0]
+            if ":" in self.REDIS_HOST:
+                # If there's a colon, check if it's just the port and strip it (we use REDIS_PORT)
+                host_parts = self.REDIS_HOST.split(":")
+                if host_parts[-1].isdigit():
+                    self.REDIS_HOST = ":".join(host_parts[:-1])
+
         if self.ARQ_REDIS_SETTINGS_HOST is None:
             self.ARQ_REDIS_SETTINGS_HOST = self.REDIS_HOST
         if self.ARQ_REDIS_SETTINGS_PORT is None:
@@ -352,6 +366,7 @@ class Settings(BaseSettings):
             self.ARQ_REDIS_SETTINGS_DB = self.REDIS_QUEUE_DB
         if self.ARQ_REDIS_SETTINGS_PASSWORD is None:
             self.ARQ_REDIS_SETTINGS_PASSWORD = self.REDIS_PASSWORD
+
         return self
 
 

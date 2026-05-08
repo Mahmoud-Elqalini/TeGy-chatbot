@@ -323,22 +323,23 @@ class Settings(BaseSettings):
         if self.MAIN_DATABASE_URL is None:
             self.MAIN_DATABASE_URL = self.CHATBOT_DATABASE_URL
 
-        # 3. Ensure CHATBOT_DATABASE_URL uses postgresql+asyncpg:// and clean unsupported query params
-        if self.CHATBOT_DATABASE_URL:
-            # Fix scheme
-            if self.CHATBOT_DATABASE_URL.startswith("postgresql://"):
-                self.CHATBOT_DATABASE_URL = self.CHATBOT_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-            
-            # Clean query parameters for asyncpg compatibility
-            if "?" in self.CHATBOT_DATABASE_URL:
-                base_url, query_params = self.CHATBOT_DATABASE_URL.split("?", 1)
+        # 3. Normalize both URLs for asyncpg compatibility
+        for attr in ["MAIN_DATABASE_URL", "CHATBOT_DATABASE_URL"]:
+            url = getattr(self, attr)
+            if url and isinstance(url, str):
+                # Fix scheme
+                if url.startswith("postgresql://"):
+                    url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
                 
-                # Check if SSL is required (Neon usually has sslmode=require)
-                is_ssl = "sslmode=require" in query_params or "ssl=require" in query_params or "ssl=true" in query_params
+                # Clean query parameters for asyncpg compatibility
+                if "?" in url:
+                    base_url, query_params = url.split("?", 1)
+                    # Check if SSL is required (Neon usually has sslmode=require)
+                    is_ssl = any(p in query_params for p in ["sslmode=require", "ssl=require", "ssl=true"])
+                    # Rebuild URL without problematic sync params
+                    url = f"{base_url}?ssl=require" if is_ssl else base_url
                 
-                # Rebuild URL without problematic params like channel_binding, target_session_attrs, etc.
-                # We only keep 'ssl=require' if it was requested
-                self.CHATBOT_DATABASE_URL = f"{base_url}?ssl=require" if is_ssl else base_url
+                setattr(self, attr, url)
 
         if self.MAIN_DATABASE_URL is None or self.CHATBOT_DATABASE_URL is None:
             raise ValueError("MAIN_DATABASE_URL and CHATBOT_DATABASE_URL must be configured, or provide legacy DATABASE_URL.")

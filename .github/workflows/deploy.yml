@@ -44,11 +44,12 @@ jobs:
               --target-port 8000 \
               --type external
 
-            # 2. Update Image and Environment Variables
+            # 2. Update Image, Replicas and Environment Variables
             az containerapp update \
               --name chatbot-app \
               --resource-group TeGy-chatbot \
               --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-app:${{ github.sha }} \
+              --min-replicas 1 \
               --set-env-vars \
                 ENV=production \
                 DEBUG=True \

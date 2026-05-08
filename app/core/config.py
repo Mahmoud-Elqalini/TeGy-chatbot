@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     MAIN_DATABASE_URL: str | None = None
     CHATBOT_DATABASE_URL: str | None = None
+    DATABASE_URL_CHATBOT: str | None = None  # Added to support Neon DB naming
     SQL_ECHO: bool = False
     SQL_POOL_PRE_PING: bool = True
-    SQL_POOL_RECYCLE: int = 3600
+    SQL_POOL_RECYCLE: int = 1800  # Reduced to 30 minutes for better cloud compatibility
     SQL_POOL_SIZE: int = 10
     SQL_MAX_OVERFLOW: int = 20
 
@@ -314,10 +315,31 @@ class Settings(BaseSettings):
         if isinstance(self.DEBUG, str):
             self.DEBUG = self.DEBUG.strip().lower() in {"1", "true", "yes", "on", "debug", "development"}
 
-        if self.CHATBOT_DATABASE_URL is None and self.DATABASE_URL is not None:
-            self.CHATBOT_DATABASE_URL = self.DATABASE_URL
+        # 1. Prioritize DATABASE_URL_CHATBOT (Neon) or CHATBOT_DATABASE_URL
+        if self.CHATBOT_DATABASE_URL is None:
+            self.CHATBOT_DATABASE_URL = self.DATABASE_URL_CHATBOT or self.DATABASE_URL
+
+        # 2. Fallback for MAIN_DATABASE_URL
         if self.MAIN_DATABASE_URL is None:
             self.MAIN_DATABASE_URL = self.CHATBOT_DATABASE_URL
+
+        # 3. Ensure CHATBOT_DATABASE_URL uses postgresql+asyncpg:// and clean unsupported query params
+        if self.CHATBOT_DATABASE_URL:
+            # Fix scheme
+            if self.CHATBOT_DATABASE_URL.startswith("postgresql://"):
+                self.CHATBOT_DATABASE_URL = self.CHATBOT_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+            
+            # Clean query parameters for asyncpg compatibility
+            if "?" in self.CHATBOT_DATABASE_URL:
+                base_url, query_params = self.CHATBOT_DATABASE_URL.split("?", 1)
+                
+                # Check if SSL is required (Neon usually has sslmode=require)
+                is_ssl = "sslmode=require" in query_params or "ssl=require" in query_params or "ssl=true" in query_params
+                
+                # Rebuild URL without problematic params like channel_binding, target_session_attrs, etc.
+                # We only keep 'ssl=require' if it was requested
+                self.CHATBOT_DATABASE_URL = f"{base_url}?ssl=require" if is_ssl else base_url
+
         if self.MAIN_DATABASE_URL is None or self.CHATBOT_DATABASE_URL is None:
             raise ValueError("MAIN_DATABASE_URL and CHATBOT_DATABASE_URL must be configured, or provide legacy DATABASE_URL.")
 

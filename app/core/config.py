@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: str = ""
     REDIS_DB: int = 0
-    REDIS_QUEUE_DB: int = 1
+    REDIS_QUEUE_DB: int = 0
     REDIS_SSL: bool = False
 
     GEMINI_API_KEY: str

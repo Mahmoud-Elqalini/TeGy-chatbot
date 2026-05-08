@@ -36,6 +36,7 @@ async def get_redis() -> "RedisClient":
                 password=settings.REDIS_PASSWORD,
                 db=settings.REDIS_DB,
                 decode_responses=True,
+                ssl=settings.REDIS_SSL,
             )
 
         if _redis_wrapper is None:

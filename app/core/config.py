@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str = ""
     REDIS_DB: int = 0
     REDIS_QUEUE_DB: int = 1
+    REDIS_SSL: bool = False
 
     GEMINI_API_KEY: str
     GEMINI_CONNECT_TIMEOUT_SECONDS: int = 5
@@ -346,6 +347,10 @@ class Settings(BaseSettings):
 
         # 4. Clean REDIS_HOST (Upstash sometimes provides URLs, but we need only the hostname)
         if self.REDIS_HOST and isinstance(self.REDIS_HOST, str):
+            # Auto-enable SSL for Upstash or Production
+            if "upstash.io" in self.REDIS_HOST.lower() or self.ENV.lower() == "production":
+                self.REDIS_SSL = True
+
             for prefix in ["https://", "http://", "redis://", "rediss://"]:
                 if self.REDIS_HOST.startswith(prefix):
                     self.REDIS_HOST = self.REDIS_HOST.replace(prefix, "", 1)

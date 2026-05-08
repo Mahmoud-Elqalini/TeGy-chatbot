@@ -30,10 +30,11 @@ jobs:
         with:
           appSourcePath: ${{ github.workspace }}
           acrName: ${{ secrets.ACR_NAME }}
+          acrUsername: ${{ secrets.ACR_USERNAME }}
+          acrPassword: ${{ secrets.ACR_PASSWORD }}
           containerAppName: chatbot-app
           resourceGroup: TeGy-chatbot
           imageToDeploy: ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-app:${{ github.sha }}
-          containerAppArguments: --min-replicas 1 --max-replicas 3
           environmentVariables: >
             ENV=production
             DEBUG=False

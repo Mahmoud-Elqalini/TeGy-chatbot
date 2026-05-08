@@ -39,6 +39,7 @@ jobs:
             ENV=production
             DEBUG=False
             DATABASE_URL_CHATBOT=${{ secrets.DATABASE_URL_CHATBOT }}
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}

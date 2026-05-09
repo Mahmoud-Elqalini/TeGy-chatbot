@@ -13,6 +13,11 @@ env/
 *.egg-info/
 dist/
 build/
+create_token.py
+test_e2e.py
+check_db.py
+init_db.py
+
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 *.db

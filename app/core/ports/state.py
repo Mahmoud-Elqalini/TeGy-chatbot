@@ -1,5 +1,6 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Optional, Union, Any, Dict
 
 
 class StatePort(ABC):
@@ -9,12 +10,12 @@ class StatePort(ABC):
     """
 
     @abstractmethod
-    async def get_state(self, key: str) -> Any | None:
+    async def get_state(self, key: str) -> Optional[Any]:
         """Retrieves raw state by key."""
         pass
 
     @abstractmethod
-    async def set_state(self, key: str, value: Any, ttl: int | None = None) -> None:
+    async def set_state(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """Persists raw state blob."""
         pass
 
@@ -24,7 +25,7 @@ class StatePort(ABC):
         pass
 
     @abstractmethod
-    async def increment(self, key: str, ttl: int | None = None) -> int:
+    async def increment(self, key: str, ttl: Optional[int] = None) -> int:
         """Atomsically increments a counter and returns the new value."""
         pass
 
@@ -34,6 +35,6 @@ class StatePort(ABC):
         pass
 
     @abstractmethod
-    async def set_nx(self, key: str, value: Any, ttl: int | None = None) -> bool:
+    async def set_nx(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Atomically sets a key if it does not exist (SETNX). Returns True if set."""
         pass

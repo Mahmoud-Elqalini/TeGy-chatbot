@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import enum
-from typing import TYPE_CHECKING, Any
+from typing import Optional, Union, TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID

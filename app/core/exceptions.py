@@ -1,5 +1,8 @@
+from __future__ import annotations
+from typing import Optional
+
 class AppException(Exception):
-    def __init__(self, status_code: int, detail: str, error_code: str | None = None):
+    def __init__(self, status_code: int, detail: str, error_code: Optional[str] = None):
         self.status_code = status_code
         self.detail = detail
         self.error_code = error_code or self.__class__.__name__.replace("Exception", "").upper()
@@ -84,6 +87,11 @@ class AITransientException(AIException):
 class LLMUnavailableException(AIException):
     def __init__(self, detail: str = "LLM unreachable or exhausted retries"):
         super().__init__(detail, "LLM_UNAVAILABLE")
+
+
+class LLMConfigurationError(AIException):
+    def __init__(self, detail: str = "No LLM providers are correctly configured"):
+        super().__init__(detail, "LLM_CONFIG_ERROR")
 
 
 class DatabaseException(AppException):

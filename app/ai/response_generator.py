@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
 from app.core.exceptions import AITimeoutException, AITransientException, LLMUnavailableException
 
@@ -33,7 +34,7 @@ class ResponseGenerator:
         except (AITimeoutException, AITransientException) as exc:
             raise LLMUnavailableException(f"LLM provider unavailable: {exc}") from exc
 
-    async def count_tokens(self, content: str, model: str | None = None) -> int:
+    async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
         """
         Calculates how many 'tokens' (pieces of words) are in a text string.
         This is important for tracking usage and costs.

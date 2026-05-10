@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ from app.repositories.message_repo import MessageRepository
 from app.ai.summarizer import Summarizer
 
 
-async def run_summarization_job(session_id: str | uuid.UUID, message_count: int, chatbot_db: AsyncSession, response_generator) -> str | None:
+async def run_summarization_job(session_id: Union[str, uuid.UUID], message_count: int, chatbot_db: AsyncSession, response_generator) -> Optional[str]:
     """
     Background job to summarize a chat session and persist it.
     Hardened for:
@@ -89,4 +91,3 @@ async def run_summarization_job(session_id: str | uuid.UUID, message_count: int,
         
     finally:
         await lock_adapter.release(lock_key, lock_token)
-

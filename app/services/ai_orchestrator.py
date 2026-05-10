@@ -2,9 +2,10 @@ from __future__ import annotations
 from app.core.config import settings
 
 import time
-from typing import Any
+from typing import Optional, Union, Any, List, Dict
 
 from app.ai.providers.base import LLMRequest, LLMResponse
+from app.ai.prompt_loader import PromptLoader
 from app.ai.response_generator import ResponseGenerator
 from app.ai.safety import ResponseValidator
 from app.ai.tool_registry import ToolRegistry
@@ -28,15 +29,15 @@ class AIOrchestrator:
         self,
         response_generator: ResponseGenerator,
         response_validator: ResponseValidator,
-        tool_registry: ToolRegistry | None = None,
-        runtime_deps: dict[str, Any] | None = None,
+        tool_registry: Optional[ToolRegistry] = None,
+        runtime_deps: Optional[Dict[str, Any]] = None,
     ):
         self.response_generator = response_generator
         self.response_validator = response_validator
         self.tool_registry = tool_registry
         self.runtime_deps = runtime_deps or {}
 
-    def _is_valid_tool_call(self, tool_calls: list | None, expected_tool: str) -> bool:
+    def _is_valid_tool_call(self, tool_calls: Optional[List], expected_tool: str) -> bool:
         if not tool_calls or not isinstance(tool_calls, list):
             return False
         return any(
@@ -57,7 +58,7 @@ class AIOrchestrator:
     async def generate_response(
         self,
         request: LLMRequest,
-        session_id: int | None = None,
+        session_id: Optional[int] = None,
     ) -> LLMResponse:
         start_time = time.perf_counter()
 
@@ -97,7 +98,12 @@ class AIOrchestrator:
             )
             raise
 
-    async def handle_tool_calls(self, response: LLMResponse, session_id: Any = None) -> list[dict[str, Any]]:
+    async def handle_tool_calls(
+        self, 
+        response: LLMResponse, 
+        session_id: Any = None, 
+        user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         if not response.tool_calls or not self.tool_registry:
             return []
 
@@ -105,10 +111,12 @@ class AIOrchestrator:
         tool_deps = dict(self.runtime_deps)
         if session_id:
             tool_deps["session_id"] = session_id
+        if user_id:
+            tool_deps["user_id"] = user_id
 
         for call in response.tool_calls:
             name = call.get("name")
-            args = call.get("arguments", {})
+            args = call.get("arguments") or {}
             call_id = call.get("id")
 
             try:
@@ -145,7 +153,7 @@ class AIOrchestrator:
             return await self._execute_fast_path(user_input, intent)
         return await self._execute_llm_path(user_input, intent, payload, session_id)
 
-    def _sanitize_tool_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sanitize_tool_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Semantic Firewall: Sanitizes tool outputs to prevent indirect prompt injection."""
         forbidden_keys = {"instruction", "command", "task", "execute", "run", "do"}
         sanitized = []
@@ -166,15 +174,15 @@ class AIOrchestrator:
             
         return sanitized
 
-    async def _execute_step(self, response: LLMResponse, session_id: Any) -> list[dict[str, Any]]:
+    async def _execute_step(self, response: LLMResponse, session_id: Any, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Deterministic execution of tool calls with semantic firewall."""
         if not response.tool_calls:
             return []
-        raw_results = await self.handle_tool_calls(response, session_id=session_id)
+        raw_results = await self.handle_tool_calls(response, session_id=session_id, user_id=user_id)
         return self._sanitize_tool_results(raw_results)
 
     async def _plan_step(
-        self, request: LLMRequest, tool_hint: str | None, session_id: Any
+        self, request: LLMRequest, tool_hint: Optional[str], session_id: Any
     ) -> LLMResponse:
         """Determines if tools are needed. Enforcement happens AFTER a failed first attempt."""
         response = await self.generate_response(request, session_id=session_id)
@@ -190,7 +198,7 @@ class AIOrchestrator:
                 retry_request = LLMRequest(
                     model=request.model,
                     system_prompt=(
-                        settings.DEFAULT_SYSTEM_PROMPT +
+                PromptLoader.get_default_system() +
                         f"\n\n[CRITICAL: You MUST call the '{tool_hint}' tool now. Text responses are forbidden.]"
                     ),
                     history=request.history,
@@ -211,11 +219,8 @@ class AIOrchestrator:
         synthesis_request = LLMRequest(
             model=request.model,
             system_prompt=(
-                settings.DEFAULT_SYSTEM_PROMPT +
-                "\n\nCONTEXTUAL DATA POLICY:\n"
-                "- Use ONLY the data provided below.\n"
-                "- Do NOT mention 'tools' or 'retrieval'.\n"
-                "- If data is insufficient, explain naturally."
+                PromptLoader.get_default_system() +
+                "\n\n" + PromptLoader.load("synthesis_policy")
             ),
             history=request.history,
             user_input=request.user_input,
@@ -234,7 +239,7 @@ class AIOrchestrator:
         # Initial Request: Natural reasoning (Soft)
         request = LLMRequest(
             model=payload["model"],
-            system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+            system_prompt=PromptLoader.get_default_system(),
             history=self.response_validator.sanitize_history(payload.get("history", [])),
             user_input=user_input,
             tool_choice="auto", # Let the model decide naturally first
@@ -252,7 +257,8 @@ class AIOrchestrator:
             return "عذراً، حدث خطأ مؤقت. من فضلك حاول مرة أخرى. 🙏", total_tokens, []
 
         # Step 2: EXECUTION ENGINE (with Semantic Firewall)
-        tool_results = await self._execute_step(plan_response, session_id)
+        user_id = payload.get("context").user_id if payload.get("context") else None
+        tool_results = await self._execute_step(plan_response, session_id, user_id=user_id)
 
         # Step 3: RENDERER ENGINE
         if plan_response.tool_calls:
@@ -262,7 +268,7 @@ class AIOrchestrator:
 
         return plan_response.content, total_tokens, []
 
-    async def _execute_fast_path(self, user_input: str, intent: str) -> tuple[str, int, list[dict]]:
+    async def _execute_fast_path(self, user_input: str, intent: str) -> tuple[str, int, List[Dict[str, Any]]]:
         request = LLMRequest(
             model=settings.GEMINI_MODEL,
             system_prompt="Quick assistant.",
@@ -275,4 +281,3 @@ class AIOrchestrator:
         if tool_results:
             content = f"Action completed: {tool_results[0].get('output')}"
         return content, response.completion_tokens, tool_results
-        

@@ -4,7 +4,7 @@ import contextvars
 import logging
 import sys
 import uuid
-from typing import Any
+from typing import Optional, Union, Any
 
 try:
     import structlog  # type: ignore
@@ -42,7 +42,7 @@ def configure_logging(debug: bool) -> None:
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, format="%(message)s", stream=sys.stdout)
 
 
-def set_request_id(request_id: str | None = None) -> str:
+def set_request_id(request_id: Optional[str] = None) -> str:
     value = request_id or str(uuid.uuid4())
     request_id_ctx.set(value)
     if structlog is not None:
@@ -60,7 +60,7 @@ def reset_request_id() -> None:
         structlog.contextvars.clear_contextvars()
 
 
-def get_logger(name: str | None = None):
+def get_logger(name: Optional[str] = None):
     return structlog.get_logger(name) if structlog is not None else logging.getLogger(name)
 
 

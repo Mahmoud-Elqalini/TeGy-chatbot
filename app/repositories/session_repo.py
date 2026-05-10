@@ -1,4 +1,5 @@
-from typing import List
+from __future__ import annotations
+from typing import Optional, Union, List
 import uuid
 
 from sqlalchemy import desc, select
@@ -15,7 +16,7 @@ class SessionRepository(BaseRepository[Session]):
     async def get_all(self, skip: int, limit: int) -> List[Session]:
         return await super().get_all(skip, limit, order_by=desc(self.model.last_active))
 
-    async def get_user_sessions(self, user_id: str | uuid.UUID, skip: int, limit: int) -> List[Session]:
+    async def get_user_sessions(self, user_id: Union[str, uuid.UUID], skip: int, limit: int) -> List[Session]:
         query = (
             select(self.model)
             .filter(self.model.user_id == user_id)
@@ -26,18 +27,18 @@ class SessionRepository(BaseRepository[Session]):
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def count_user_sessions(self, user_id: str | uuid.UUID) -> int:
+    async def count_user_sessions(self, user_id: Union[str, uuid.UUID]) -> int:
         from sqlalchemy import func
         query = select(func.count(self.model.session_id)).filter(self.model.user_id == user_id)
         result = await self.db.execute(query)
         return result.scalar_one()
 
-    async def get_owned_session(self, session_id: str | uuid.UUID, user_id: str | uuid.UUID) -> Session | None:
+    async def get_owned_session(self, session_id: Union[str, uuid.UUID], user_id: Union[str, uuid.UUID]) -> Optional[Session]:
         query = select(self.model).filter(self.model.session_id == session_id, self.model.user_id == user_id)
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
-    async def delete_user_session(self, session_id: str | uuid.UUID, user_id: str | uuid.UUID) -> bool:
+    async def delete_user_session(self, session_id: Union[str, uuid.UUID], user_id: Union[str, uuid.UUID]) -> bool:
         from sqlalchemy import delete
         stmt = delete(self.model).where(
             self.model.session_id == session_id,
@@ -47,7 +48,7 @@ class SessionRepository(BaseRepository[Session]):
         await self.db.commit()
         return result.rowcount > 0
 
-    async def update_user_session(self, session_id: str | uuid.UUID, user_id: str | uuid.UUID, update_data: dict) -> bool:
+    async def update_user_session(self, session_id: Union[str, uuid.UUID], user_id: Union[str, uuid.UUID], update_data: dict) -> bool:
         from sqlalchemy import update
         if not update_data:
             return False

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 
 import json
 from app.db.redis import RedisClient
@@ -67,7 +68,7 @@ class IdempotencyService:
     # -------------------------------------------------------------
     # Check idempotency state
     # -------------------------------------------------------------
-    async def check(self, idempotency_key: str) -> tuple[str, dict | None]:
+    async def check(self, idempotency_key: str) -> tuple[str, Optional[dict]]:
         """
         Check current request state.
 

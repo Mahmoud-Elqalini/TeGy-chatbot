@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 
 try:
@@ -19,8 +20,6 @@ except ModuleNotFoundError:  # pragma: no cover
 from app.core.config import settings
 from app.db.chatbot_database import ChatbotSessionLocal
 from app.workers.summarization_worker import run_summarization_job
-from app.ai.providers.gemini_provider import GeminiProvider
-from app.ai.providers.fallback_provider import FallbackProvider
 from app.ai.response_generator import ResponseGenerator
 from app.core.observability import get_logger
 
@@ -28,16 +27,11 @@ logger = get_logger(__name__)
 
 async def startup(ctx: dict):
     logger.info("Worker starting up... Initializing AI Providers.")
-    # Initialize basic provider chain for the worker
-    providers = [GeminiProvider()]
-    if settings.GROQ_API_KEY:
-        from app.ai.providers.groq_provider import GroqProvider
-        providers.append(GroqProvider())
-    if settings.OPENROUTER_API_KEY:
-        from app.ai.providers.openrouter_provider import OpenRouterProvider
-        providers.append(OpenRouterProvider())
-        
-    primary_provider = FallbackProvider(providers) if len(providers) > 1 else providers[0]
+    # Initialize the provider fallback chain (Gemini -> Groq -> OpenRouter)
+    # automatically based on configuration and priority.
+    from app.ai.providers.factory import ProviderFactory
+    primary_provider = ProviderFactory.initialize_provider_chain()
+    
     ctx["response_generator"] = ResponseGenerator(primary_provider)
     ctx["primary_provider"] = primary_provider
 
@@ -61,7 +55,7 @@ def get_arq_redis_settings() -> RedisSettings:
 # Removed _persist_failed_job as FailedJob model was deleted in schema simplification.
 
 
-async def summarize_session_job(ctx: dict, session_id: str | uuid.UUID, message_count: int) -> str | None:
+async def summarize_session_job(ctx: dict, session_id: Union[str, uuid.UUID], message_count: int) -> Optional[str]:
     try:
         response_generator = ctx["response_generator"]
         async with ChatbotSessionLocal() as chatbot_db:

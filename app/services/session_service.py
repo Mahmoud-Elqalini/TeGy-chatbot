@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Optional, Union, Any
 
 import logging
 
+from app.ai.prompt_loader import PromptLoader
 from app.core.config import settings
 from app.core.exceptions import SessionNotFoundException, ModelSettingsNotFoundException, ValidationException
 from app.repositories.session_repo import SessionRepository
@@ -31,8 +32,8 @@ class SessionService:
         message_repo: MessageRepository, 
         memory: MemoryManager,
         model_settings_repo: ModelSettingsRepository,
-        summary_repo: SummaryRepository | None = None,
-        memory_repo: MemoryRepository | None = None
+        summary_repo: Optional[SummaryRepository] = None,
+        memory_repo: Optional[MemoryRepository] = None
     ):
         self.session_repo = session_repo
         self.message_repo = message_repo
@@ -41,7 +42,7 @@ class SessionService:
         self.memory_repo = memory_repo
         self.model_settings_repo = model_settings_repo
 
-    async def get_or_create_session(self, session_id: uuid.UUID | None, user_id: uuid.UUID) -> Any:
+    async def get_or_create_session(self, session_id: Optional[uuid.UUID], user_id: uuid.UUID) -> Any:
         """Ensures a session exists and is initialized in memory."""
         if session_id:
             session = await self.get_session_model_for_user(session_id, user_id)
@@ -58,7 +59,7 @@ class SessionService:
                 channel=session.channel or "web",
                 current_intent=session.current_intent or "",
                 current_summary=session.current_summary or "",
-                system_prompt=session.system_prompt or settings.DEFAULT_SYSTEM_PROMPT
+                system_prompt=session.system_prompt or PromptLoader.get_default_system()
             )
             try:
                 await self.memory.save_context(str(session.session_id), context)
@@ -97,7 +98,7 @@ class SessionService:
     async def _resolve_system_prompt(self, session_in: SessionCreate) -> str:
         """Resolves the system prompt strictly from the global configuration."""
         logger.info("system_prompt.resolved", extra={"source": "config_default"})
-        return settings.DEFAULT_SYSTEM_PROMPT
+        return PromptLoader.get_default_system()
 
     async def get_session_model_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> Any:
         """Fetches a session and validates ownership."""
@@ -106,7 +107,7 @@ class SessionService:
             raise SessionNotFoundException("Session not found or inaccessible.")
         return session
 
-    async def finalize_session(self, session_id: uuid.UUID, intent: str, summary: str | dict | None = None, version: int | None = None):
+    async def finalize_session(self, session_id: uuid.UUID, intent: str, summary: Optional[Union[str, dict]] = None, version: Optional[int] = None):
         """Updates session metadata in the database."""
         session = await self.session_repo.get(session_id)
         if not session: return
@@ -125,7 +126,7 @@ class SessionService:
             
         await self.session_repo.update(session, updates)
 
-    async def update_summarization_results(self, session_id: uuid.UUID, summary_data: dict, target_version: int | None = None):
+    async def update_summarization_results(self, session_id: uuid.UUID, summary_data: dict, target_version: Optional[int] = None):
         """
         Stores advanced summarization results into versioned conv_summaries
         and session_memory tables.

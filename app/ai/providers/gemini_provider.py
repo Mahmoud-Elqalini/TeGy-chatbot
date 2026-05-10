@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 
 import asyncio
 import logging
@@ -8,6 +9,7 @@ import traceback
 import google.generativeai as genai
 
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.ai.providers.registry import register_provider
 from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.ai.safety import InputSafetyGuard
 from app.core.config import settings
@@ -17,10 +19,12 @@ from app.core.observability import get_logger
 logger = get_logger(__name__)
 
 
+@register_provider("gemini")
 class GeminiProvider(LLMProvider):
     provider_name = "gemini"
+    api_key_setting = "GEMINI_API_KEY"
 
-    def __init__(self, safety_guard: InputSafetyGuard | None = None):
+    def __init__(self, safety_guard: Optional[InputSafetyGuard] = None):
         self.safety_guard = safety_guard or InputSafetyGuard()
         genai.configure(api_key=settings.GEMINI_API_KEY)
         # Resilience
@@ -197,7 +201,7 @@ class GeminiProvider(LLMProvider):
             raw={"candidates": len(response.candidates) if hasattr(response, "candidates") else 0},
         )
 
-    async def count_tokens(self, content: str, model: str | None = None) -> int:
+    async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
         model_name = model or settings.GEMINI_MODEL
         if not model_name.startswith("models/"):
              model_name = f"models/{model_name}"

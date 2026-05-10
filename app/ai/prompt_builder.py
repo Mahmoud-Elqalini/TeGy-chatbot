@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Any
+from typing import Optional, Union, Any
+from app.ai.prompt_loader import PromptLoader
 from app.core.config import settings
 from app.schemas.chat_dtos import ChatContext
 
 class PromptBuilder:
-    def build_system_prompt(self, context: ChatContext, detected_intent: str | None = None) -> str:
-        parts = [settings.DEFAULT_SYSTEM_PROMPT]
+    def build_system_prompt(self, context: ChatContext, detected_intent: Optional[str] = None) -> str:
+        parts = [PromptLoader.get_default_system()]
 
             
         parts.append(

@@ -11,11 +11,10 @@ from app.db.redis import close_redis
 from app.api.v1.routes import chat, health, sessions
 
 # Import core AI and service components
-from app.ai.providers.gemini_provider import GeminiProvider
-from app.ai.providers.fallback_provider import FallbackProvider
 from app.ai.response_generator import ResponseGenerator
 from app.ai.tool_registry import ToolRegistry
 from app.ai.tools import discover_and_register
+from app.ai.prompt_loader import PromptLoader
 from arq import create_pool
 from app.workers.arq_jobs import get_arq_redis_settings
 
@@ -34,34 +33,27 @@ async def lifespan(app: FastAPI):
     
     # --- Initialization Phase ---
     
-    # 1. Build the provider fallback chain: Gemini → Groq → OpenRouter
-    #    Only adds fallback providers if their API keys are configured.
-    providers = [GeminiProvider()]
+    # Initialize the provider fallback chain (Gemini -> Groq -> OpenRouter)
+    # automatically based on configuration and priority.
+    from app.ai.providers.factory import ProviderFactory
+    primary_provider = ProviderFactory.initialize_provider_chain()
 
-    if settings.GROQ_API_KEY:
-        from app.ai.providers.groq_provider import GroqProvider
-        providers.append(GroqProvider())
-        logger.info("Groq fallback provider registered")
-
-    if settings.OPENROUTER_API_KEY:
-        from app.ai.providers.openrouter_provider import OpenRouterProvider
-        providers.append(OpenRouterProvider())
-        logger.info("OpenRouter fallback provider registered")
-
-    # Wrap all providers in a FallbackProvider for automatic failover
-    primary_provider = FallbackProvider(providers) if len(providers) > 1 else providers[0]
-    logger.info(f"AI provider chain initialized: {[p.provider_name for p in providers]}")
-
-    # 2. Initialize response generator and tool registry
+    # 1. Initialize response generator
     response_generator = ResponseGenerator(primary_provider)
+    
+    # 2. Auto-discover and register all tools from app/ai/tools/
+    # This must happen BEFORE ToolRegistry() to populate the global catalog.
+    discover_and_register()
+    
+    # 3. Warm the prompt cache (loads all .md/.txt files from app/ai/prompts/)
+    PromptLoader.load_all()
+    
+    # 4. Initialize tool registry (clones the global catalog)
     tool_registry = ToolRegistry()
     
-    # 3. Auto-discover and register all tools from app/ai/tools/
-    discover_and_register(tool_registry)
-    
-    # 4. Save initialized objects to app state
+    # 5. Save initialized objects to app state
     # This makes them accessible in any route handler via `request.app.state`.
-    app.state.gemini_provider = primary_provider
+    app.state.ai_provider = primary_provider
     app.state.response_generator = response_generator
     app.state.tool_registry = tool_registry
     app.state.arq_pool = await create_pool(get_arq_redis_settings())

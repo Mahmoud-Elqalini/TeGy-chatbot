@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import uuid
 import enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, List
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.config import settings
+from app.ai.prompt_loader import PromptLoader
 from app.models.chatbot.base import ChatbotBase
 
 if TYPE_CHECKING:
@@ -30,13 +30,13 @@ class Session(ChatbotBase):
 
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    model_setting_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("model_settings.model_setting_id", ondelete="SET NULL"))
-    title: Mapped[str | None] = mapped_column(String(255))
+    model_setting_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("model_settings.model_setting_id", ondelete="SET NULL"))
+    title: Mapped[Optional[str]] = mapped_column(String(255))
     channel: Mapped[str] = mapped_column(String(50), default="web", server_default="web")
     status: Mapped[SessionStatus] = mapped_column(SQLEnum(SessionStatus, native_enum=False), default=SessionStatus.active, server_default="active")
-    current_intent: Mapped[str | None] = mapped_column(String(255))
-    current_summary: Mapped[str | None] = mapped_column(Text)
-    system_prompt: Mapped[str | None] = mapped_column(Text, default=settings.DEFAULT_SYSTEM_PROMPT)
+    current_intent: Mapped[Optional[str]] = mapped_column(String(255))
+    current_summary: Mapped[Optional[str]] = mapped_column(Text)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, default=PromptLoader.get_default_system)
     last_active: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

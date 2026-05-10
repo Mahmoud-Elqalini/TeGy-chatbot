@@ -1,5 +1,6 @@
+from __future__ import annotations
 import uuid
-from typing import Any, Dict
+from typing import Optional, Union, Any, Dict
 from app.services.message_service import MessageService
 from app.services.session_service import SessionService
 from app.models.chatbot.message import MessageRole
@@ -33,7 +34,7 @@ class ChatPersistenceService:
             metadata=metadata
         )
 
-    async def finalize_session(self, session_id: uuid.UUID, metadata: Dict[str, Any] | None = None, version: int | None = None) -> None:
+    async def finalize_session(self, session_id: uuid.UUID, metadata: Dict[str, Any] | None = None, version: Optional[int] = None) -> None:
         """Finalizes session using metadata blob."""
         # Map metadata to expected fields if necessary, but keep service interface generic
         intent = metadata.get("intent", "unknown") if metadata else "unknown"

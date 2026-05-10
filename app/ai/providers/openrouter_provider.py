@@ -8,17 +8,22 @@ import logging
 import time
 
 import httpx
+import json
 
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.ai.providers.registry import register_provider
 from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.core.config import settings
 from app.core.exceptions import AITimeoutException, AITransientException
+from typing import Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
 
+@register_provider("openrouter")
 class OpenRouterProvider(LLMProvider):
     provider_name = "openrouter"
+    api_key_setting = "OPENROUTER_API_KEY"
 
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
@@ -151,7 +156,6 @@ class OpenRouterProvider(LLMProvider):
             if "tool_calls" in message:
                 for tc in message["tool_calls"]:
                     if tc["type"] == "function":
-                        import json
                         tool_calls.append({
                             "id": tc.get("id"),
                             "name": tc["function"]["name"],
@@ -195,7 +199,7 @@ class OpenRouterProvider(LLMProvider):
             
         return new_schema
 
-    async def count_tokens(self, content: str, model: str | None = None) -> int:
+    async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
         """Estimate tokens (no dedicated counting endpoint)."""
         return max(1, int(len(content.split()) * 1.3))
 

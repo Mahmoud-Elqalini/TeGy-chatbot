@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 from fastapi import APIRouter, Depends, Header, Request, Response, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,12 +40,12 @@ async def get_session_service(
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.post("/message", response_model=ChatIntegrationResponse | ChatMessageResponse)
+@router.post("/message", response_model=Union[ChatIntegrationResponse, ChatMessageResponse])
 async def send_chat_message(
     request: ChatMessageRequest,
     auth = Depends(get_auth_context),
     app_service: ChatApplicationService = Depends(get_chat_application_service),
-    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+    x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key"),
 ):
     """
     Thin Controller: Handles only Auth resolution and delegates to Application Layer.
@@ -78,4 +80,3 @@ async def get_chat_history(
     return await service.get_session_history(
         session_id=session_id, user_id=user_id, skip=skip, limit=limit
     )
-

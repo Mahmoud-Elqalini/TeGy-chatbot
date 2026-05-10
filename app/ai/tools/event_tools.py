@@ -5,7 +5,33 @@ Event-related tools for the AI chatbot.
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.semantic_search_service import SemanticSearchService
 from app.repositories.main.event_repo import MainEventRepository
+from app.ai.tool_registry import ToolRegistry
 
+
+@ToolRegistry.register_tool(
+    name="search_events",
+    description=(
+        "Semantic search for live events. "
+        "Use this when the user wants to find events, browse events, "
+        "or get recommendations for events. "
+        "This tool searches semantically, then fetches the latest event data from the original MSSQL database."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "q": {
+                "type": "string",
+                "description": "Search query such as 'cairo music events this weekend'"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of events to return"
+            }
+        },
+        "required": ["q"]
+    },
+    metadata={"category": "events"}
+)
 async def search_events(q: str, limit: int = 8, main_db: AsyncSession = None, **kwargs):
     """
     Pure orchestrator tool:
@@ -35,8 +61,6 @@ async def search_events(q: str, limit: int = 8, main_db: AsyncSession = None, **
     raw_events = await event_repo.get_events_by_ids(source_ids)
 
     # Step 3: Prune and return merged response
-    # We only send what the AI actually needs to synthesize a response
-    # to keep the prompt small and fast.
     events = []
     for ev in raw_events:
         events.append({
@@ -59,34 +83,3 @@ async def search_events(q: str, limit: int = 8, main_db: AsyncSession = None, **
         "events_found": len(events),
         "events": events,
     }
-
-
-def register(tool_registry):
-    """Register all event-related tools."""
-
-    @tool_registry.register(
-        name="search_events",
-        description=(
-            "Semantic search for live events. "
-            "Use this when the user wants to find events, browse events, "
-            "or get recommendations for events. "
-            "This tool searches semantically, then fetches the latest event data from the original MSSQL database."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "q": {
-                    "type": "string",
-                    "description": "Search query such as 'cairo music events this weekend'"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of events to return"
-                }
-            },
-            "required": ["q"]
-        }
-    )
-    async def search_events_tool(**kwargs):
-        return await search_events(**kwargs)
-

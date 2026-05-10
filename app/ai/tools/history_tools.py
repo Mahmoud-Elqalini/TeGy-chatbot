@@ -2,14 +2,17 @@ import uuid
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.message_repo import MessageRepository
+from app.ai.tool_registry import ToolRegistry
 
 MAX_HISTORY_TOKENS = 500_000
+
 
 def estimate_text_tokens(text: str) -> int:
     """Rough conservative estimate (chars // 3)."""
     if not text:
         return 0
     return max(1, len(text) // 3)
+
 
 def format_message(m) -> str:
     role = getattr(m, "role", "unknown")
@@ -18,6 +21,7 @@ def format_message(m) -> str:
 
     created_at_text = created_at.isoformat() if created_at else "unknown"
     return f"[{created_at_text}] {role}: {content}"
+
 
 def trim_history_fifo(messages: List[Any], max_tokens: int) -> List[Any]:
     """Drops oldest messages first until history fits budget."""
@@ -30,6 +34,31 @@ def trim_history_fifo(messages: List[Any], max_tokens: int) -> List[Any]:
         trimmed.pop(0)
     return []
 
+
+@ToolRegistry.register_tool(
+    name="get_conversation_history",
+    description=(
+        "Fetch previous messages from the current conversation when needed. "
+        "Use this ONLY if the user refers to something earlier, asks about previous context, "
+        "continues an old topic, or if answering correctly requires knowing details from earlier in this specific conversation. "
+        "Do not use this for the immediate previous message (which you already have)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Short reason why conversation history is needed (e.g., 'user asked about a previous event mentioned')."
+            },
+            "max_tokens": {
+                "type": "integer",
+                "description": "Optional token budget for the history snippet."
+            }
+        },
+        "required": ["reason"]
+    },
+    metadata={"category": "system"}
+)
 async def get_conversation_history(
     reason: str,
     max_tokens: int = 500000,
@@ -66,32 +95,3 @@ async def get_conversation_history(
         "returned_messages": len(trimmed_messages),
         "history": formatted_history,
     }
-
-def register(tool_registry):
-    """Register history management tools."""
-
-    @tool_registry.register(
-        name="get_conversation_history",
-        description=(
-            "Fetch previous messages from the current conversation when needed. "
-            "Use this ONLY if the user refers to something earlier, asks about previous context, "
-            "continues an old topic, or if answering correctly requires knowing details from earlier in this specific conversation. "
-            "Do not use this for the immediate previous message (which you already have)."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string",
-                    "description": "Short reason why conversation history is needed (e.g., 'user asked about a previous event mentioned')."
-                },
-                "max_tokens": {
-                    "type": "integer",
-                    "description": "Optional token budget for the history snippet."
-                }
-            },
-            "required": ["reason"]
-        }
-    )
-    async def get_conversation_history_tool(**kwargs):
-        return await get_conversation_history(**kwargs)

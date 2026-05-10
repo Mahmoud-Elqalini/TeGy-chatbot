@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 from fastapi import Header, HTTPException, status, Request
 
 from app.core.config import settings
@@ -8,7 +10,7 @@ from app.core.config import settings
 # ---------------------------------------------------------------------
 async def verify_api_key(
     request: Request,
-    x_api_key: str | None = Header(default=None),
+    x_api_key: Optional[str] = Header(default=None),
 ) -> None:
     """
     Dependency used to secure internal service-to-service communication.

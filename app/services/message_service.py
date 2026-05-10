@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import logging
 import uuid
 
@@ -15,11 +17,11 @@ class MessageService:
 
     async def save_message(
         self,
-        session_id: str | uuid.UUID,
+        session_id: Union[str, uuid.UUID],
         role: MessageRole,
         content: str,
-        metadata: dict | None = None,
-        token_count: int | None = None,
+        metadata: Optional[dict] = None,
+        token_count: Optional[int] = None,
     ) -> MessageRead:
         payload = MessageCreate(
             session_id=session_id,
@@ -39,7 +41,7 @@ class MessageService:
         )
         return MessageRead.model_validate(db_obj)
 
-    async def get_session_history(self, session_id: str | uuid.UUID, limit: int = 100) -> list:
+    async def get_session_history(self, session_id: Union[str, uuid.UUID], limit: int = 100) -> list:
         return await self.message_repo.get_session_messages(session_id, limit=limit)
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 from fastapi import Depends, Header, Request, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -13,12 +15,12 @@ security_scheme = HTTPBearer(auto_error=False)
 
 class CurrentActor(BaseModel):
     subject: str
-    user_id: uuid.UUID | None = None
-    user_source_id: str | None = None
+    user_id: Optional[uuid.UUID] = None
+    user_source_id: Optional[str] = None
 
 
 async def get_current_actor(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
 ) -> CurrentActor:
     if not credentials:
         raise InvalidTokenException("Missing or invalid authorization header.")
@@ -40,8 +42,8 @@ async def get_current_user(actor: CurrentActor = Depends(get_current_actor)) -> 
 
 async def get_auth_context(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
-    x_api_key: str | None = Header(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    x_api_key: Optional[str] = Header(default=None),
 ) -> AuthContext:
     """
     Unified authentication dependency supporting both JWT and API Key.

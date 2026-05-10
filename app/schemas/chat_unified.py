@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -35,10 +37,10 @@ class ChatIntegrationRequest(BaseModel):
     Integration Request Model (Shared secret auth).
     """
     user_id: uuid.UUID
-    session_id: uuid.UUID | None = None
+    session_id: Optional[uuid.UUID] = None
     message: str
     role: str = "user"
-    user_profile: UserProfile | None = None
+    user_profile: Optional[UserProfile] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -54,14 +56,14 @@ class ChatMessageRequest(BaseModel):
     """
     Main Chat Request Model.
 
-    - In USER mode (JWT auth): user_id is resolved from the token and ignored if sent.
-    - In INTEGRATION mode (API Key auth): user_id is required in the body.
+    - USER mode (JWT): user_id is IGNORED — identity comes exclusively from the JWT token.
+    - INTEGRATION mode (API Key): user_id is REQUIRED in the body to identify the end-user.
     """
-    user_id: uuid.UUID | None = Field(None, description="Required for INTEGRATION mode. Ignored for USER mode (resolved from JWT).")
-    session_id: uuid.UUID | None = Field(None, description="Existing session ID. If None, a new session is created.")
+    user_id: Optional[uuid.UUID] = Field(None, description="Only used in INTEGRATION mode. Ignored in USER mode (resolved from JWT).")
+    session_id: Optional[uuid.UUID] = Field(None, description="Existing session ID. If None, a new session is created.")
     message: str = Field(min_length=1, max_length=5000, description="The user message content. Max 5000 characters.")
     role: MessageRole = Field(MessageRole.user, description="Role of the message sender.")
-    user_profile: UserProfile | None = Field(None, description="Required on first message in INTEGRATION mode for new sessions.")
+    user_profile: Optional[UserProfile] = Field(None, description="Required on first message in INTEGRATION mode for new sessions.")
 
 
 # --- Response Models ---

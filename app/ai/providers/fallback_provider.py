@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List
+from typing import Optional, Union, List
 
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
 from app.core.exceptions import AITransientException, AITimeoutException, LLMUnavailableException
@@ -37,7 +37,7 @@ class FallbackProvider(LLMProvider):
         self.providers = providers
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
-        last_exception: Exception | None = None
+        last_exception: Optional[Exception] = None
         skipped_info = []
 
         # 1. Health-Based Selection: Rank providers by real-time health score
@@ -140,7 +140,7 @@ class FallbackProvider(LLMProvider):
             f"Last technical error: {last_exception}"
         )
 
-    async def count_tokens(self, content: str, model: str | None = None) -> int:
+    async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
         try:
             return await self.providers[0].count_tokens(content, model)
         except Exception:

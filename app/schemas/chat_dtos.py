@@ -1,6 +1,7 @@
+from __future__ import annotations
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Union, Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from app.models.chatbot.message import MessageRole
 from app.core.config import settings
@@ -45,8 +46,8 @@ class ChatDomainResponse:
 class WorkflowContext:
     """State carrier for the application workflow."""
     user_id: uuid.UUID
-    session_id: uuid.UUID | None = None
-    idempotency_key: str | None = None
+    session_id: Optional[uuid.UUID] = None
+    idempotency_key: Optional[str] = None
     auth_mode: str = "USER"
     is_new_user: bool = False
     start_time: float = 0.0

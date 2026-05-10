@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Optional, Union, Any
 
 
 @dataclass(slots=True)
@@ -12,7 +12,7 @@ class LLMRequest:
     history: list[dict[str, Any]]
     user_input: str
     tools: list[dict[str, Any]] | None = None
-    tool_choice: str | None = None  # none, auto, required
+    tool_choice: Optional[str] = None  # none, auto, required
     tool_results: list[dict[str, Any]] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -37,7 +37,7 @@ class LLMProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def count_tokens(self, content: str, model: str | None = None) -> int:
+    async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
         raise NotImplementedError
 
     async def close(self) -> None:

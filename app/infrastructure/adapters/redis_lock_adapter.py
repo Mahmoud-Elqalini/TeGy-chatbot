@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 import uuid
 from app.core.ports.lock import LockPort
 from app.db.redis import RedisClient
@@ -21,7 +23,7 @@ class RedisLockAdapter(LockPort):
     def __init__(self, redis: RedisClient):
         self.redis = redis
 
-    async def acquire(self, key: str, ttl: int = 30) -> str | None:
+    async def acquire(self, key: str, ttl: int = 30) -> Optional[str]:
         token = str(uuid.uuid4())
         lock_key = f"lock:session:{key}:processing"
         

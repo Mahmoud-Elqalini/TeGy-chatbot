@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, TypedDict, Literal
+from typing import Optional, Union, Any, TypedDict, Literal
 from app.core.observability import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +38,7 @@ class IntentDetector:
     BOOKING_HINTS = {"ticket", "booking", "reserve", "seat", "buy", "purchase", "order", "reservation", "confirm"}
     GREETING_HINTS = {"hi", "hello", "hey", "hola", "هاي", "سلام", "اهلا", "مرحبا", "صباح", "مساء"}
 
-    def __init__(self, response_generator: Any | None = None):
+    def __init__(self, response_generator: Optional[Any] = None):
         """
         Initializes the IntentDetector.
         """

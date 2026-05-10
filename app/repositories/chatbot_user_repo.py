@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 
 import uuid
 from datetime import datetime, timezone
@@ -7,16 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DatabaseException
 from app.models.chatbot.user import ChatbotUser
+from app.repositories.base_repo import BaseRepository
 
 
-class ChatbotUserRepository:
+class ChatbotUserRepository(BaseRepository[ChatbotUser]):
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        super().__init__(model=ChatbotUser, db=db, id_field="user_id")
 
     async def upsert(
         self,
-        user_id: uuid.UUID | str,
+        user_id: Union[uuid.UUID, str],
         name: str,
         email: str,
         gender: str,
@@ -56,4 +58,3 @@ class ChatbotUserRepository:
             from app.core.observability import get_logger
             get_logger(__name__).error(f"Upsert failed: {exc}")
             raise DatabaseException(f"Failed to upsert chatbot user: {exc}") from exc
-        

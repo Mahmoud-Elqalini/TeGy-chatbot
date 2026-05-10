@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Optional, Any, List, Dict
 
 import enum
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SQLEnum, Integer, String, Text
@@ -19,11 +20,11 @@ class MainUser(MainBase):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     username: Mapped[str] = mapped_column(String(255), nullable=False)
-    first_name: Mapped[str | None] = mapped_column(Text)
-    last_name: Mapped[str | None] = mapped_column(Text)
-    age: Mapped[int | None] = mapped_column(Integer)
-    gender: Mapped[MainGenderType | None] = mapped_column(SQLEnum(MainGenderType, name="gender_type"))
-    city: Mapped[str | None] = mapped_column(Text)
+    first_name: Mapped[Optional[str]] = mapped_column(Text)
+    last_name: Mapped[Optional[str]] = mapped_column(Text)
+    age: Mapped[Optional[int]] = mapped_column(Integer)
+    gender: Mapped[Optional[MainGenderType]] = mapped_column(SQLEnum(MainGenderType, name="gender_type"))
+    city: Mapped[Optional[str]] = mapped_column(Text)
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True))

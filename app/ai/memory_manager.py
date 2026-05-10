@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Union, Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -185,20 +185,20 @@ class MemoryManager:
 
     # --- High-Level Message Lifecycle ---
 
-    async def after_user_message(self, session_id: str | Any, content: str) -> bool:
+    async def after_user_message(self, session_id: Union[str, Any], content: str) -> bool:
         """Processes logic after a user message."""
         session_key = str(session_id)
         await self.save_message(session_key, "user", content)
         return await self.should_summarize(session_key)
 
-    async def after_assistant_message(self, session_id: str | Any, content: str, intent: str | None = None) -> None:
+    async def after_assistant_message(self, session_id: Union[str, Any], content: str, intent: Optional[str] = None) -> None:
         """Processes logic after an assistant message."""
         session_key = str(session_id)
         await self.save_message(session_key, "assistant", content)
         if intent:
             await self.update_context_fields(session_key, {"current_intent": intent})
 
-    async def build_llm_payload(self, session_id: str | Any, user_message: str, max_tokens: int | None = None) -> dict | None:
+    async def build_llm_payload(self, session_id: Union[str, Any], user_message: str, max_tokens: Optional[int] = None) -> Optional[dict]:
         """Prepares the payload for the LLM."""
         if max_tokens is None:
             max_tokens = settings.AI_MAX_TOKENS
@@ -226,7 +226,7 @@ class MemoryManager:
             token_count += est
         return list(reversed(trimmed))
 
-    async def summarize_current_session(self, session_id: str | Any) -> str | None:
+    async def summarize_current_session(self, session_id: Union[str, Any]) -> Optional[str]:
         """Generates and saves a session summary."""
         session_key = str(session_id)
         try:

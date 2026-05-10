@@ -62,7 +62,9 @@ class GroqProvider(LLMProvider):
 
     async def _single_attempt(self, request: LLMRequest) -> LLMResponse:
         """Single generation attempt — called by retry_with_backoff."""
-        model_name = request.model or settings.GROQ_MODEL
+        # Always use the Groq-specific model — never use request.model
+        # (which may contain a Gemini/other provider model name like 'gemini-3-flash-preview')
+        model_name = settings.GROQ_MODEL
 
         # Build messages in OpenAI format
         messages = []

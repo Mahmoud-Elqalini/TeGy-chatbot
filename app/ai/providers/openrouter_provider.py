@@ -62,7 +62,9 @@ class OpenRouterProvider(LLMProvider):
 
     async def _single_attempt(self, request: LLMRequest) -> LLMResponse:
         """Single generation attempt — called by retry_with_backoff."""
-        model_name = request.model or settings.OPENROUTER_MODEL
+        # Always use the OpenRouter-specific model — never use request.model
+        # (which may contain a Gemini/other provider model name)
+        model_name = settings.OPENROUTER_MODEL
 
         # Build messages in OpenAI format
         messages = []

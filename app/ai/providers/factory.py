@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class ProviderFactory:
     # Priority list defining the order of fallback
     # The first available provider in this list will be the primary.
-    PRIORITY_LIST = ["gemini", "groq", "openrouter"]
+    PRIORITY_LIST = ["groq", "gemini", "openrouter"]
 
     @classmethod
     def initialize_provider_chain(cls) -> LLMProvider:

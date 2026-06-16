@@ -7,11 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.message_schema import ChatMessage, MessageRole
 
 
-# --- Enums ---
-
-
-
-
 # --- Common Components ---
 
 class UserProfile(BaseModel):
@@ -26,6 +21,7 @@ class UserProfile(BaseModel):
 class ChatMessageMetadata(BaseModel):
     tokens_used: int = 0
     latency_ms: int = 0
+    perf_breakdown: Optional[Dict[str, Any]] = Field(None, description="Performance timing breakdown per pipeline step (debug only).")
 
 
 # --- Request Models ---

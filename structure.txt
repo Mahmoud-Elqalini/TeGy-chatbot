@@ -9,7 +9,7 @@ app/
 │   │   ├── base.py                     # Abstract base class for all LLM providers
 │   │   ├── gemini_provider.py          # Google Gemini (primary provider)
 │   │   ├── groq_provider.py            # Groq/Llama (1st fallback)
-│   │   ├── openrouter_provider.py      # OpenRouter (2nd fallback)
+
 │   │   ├── fallback_provider.py        # Auto-failover orchestrator across providers
 │   │   └── resilience.py              # Retry, circuit-breaker, backoff logic
 │   ├── tools/                          # AI Function Calling Tools

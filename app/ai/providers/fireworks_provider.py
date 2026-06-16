@@ -1,6 +1,5 @@
 """
-OpenRouter LLM Provider — Uses OpenAI-compatible API via OpenRouter.
-Last resort fallback when both Gemini and Groq are exhausted.
+Fireworks.ai LLM Provider — Uses the Fireworks REST API (OpenAI-compatible).
 """
 from __future__ import annotations
 
@@ -14,32 +13,33 @@ from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
 from app.ai.providers.registry import register_provider
 from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.core.config import settings
-from app.core.exceptions import AITimeoutException, AITransientException
+from app.core.exceptions import AITimeoutException, AITransientException, AIFatalException
 from typing import Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
 
-@register_provider("openrouter")
-class OpenRouterProvider(LLMProvider):
-    provider_name = "openrouter"
-    api_key_setting = "OPENROUTER_API_KEY"
+@register_provider("fireworks")
+class FireworksProvider(LLMProvider):
+    provider_name = "fireworks"
+    api_key_setting = "FIREWORKS_API_KEY"
 
     def __init__(self):
-        self.api_key = settings.OPENROUTER_API_KEY
-        self.base_url = settings.OPENROUTER_BASE_URL
-        # Reuse HTTP client for connection pooling (longer timeout for free models)
+        self.api_key = settings.FIREWORKS_API_KEY
+        self.base_url = settings.FIREWORKS_BASE_URL
+        # Reuse HTTP client for connection pooling
         self._client = httpx.AsyncClient(
-            timeout=settings.OPENROUTER_TIMEOUT_SECONDS,
+            timeout=settings.FIREWORKS_TIMEOUT_SECONDS,
+            trust_env=False,
             limits=httpx.Limits(max_connections=settings.HTTP_MAX_CONNECTIONS, max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE),
         )
         # Resilience
         self.circuit = ProviderCircuitBreaker(
-            "openrouter", 
+            "fireworks", 
             failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD, 
             cooldown_seconds=settings.CIRCUIT_BREAKER_COOLDOWN_SECONDS
         )
-        self.metrics = ProviderMetrics("openrouter")
+        self.metrics = ProviderMetrics("fireworks")
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """Generate with retry + circuit breaker + metrics."""
@@ -62,9 +62,7 @@ class OpenRouterProvider(LLMProvider):
 
     async def _single_attempt(self, request: LLMRequest) -> LLMResponse:
         """Single generation attempt — called by retry_with_backoff."""
-        # Always use the OpenRouter-specific model — never use request.model
-        # (which may contain a Gemini/other provider model name)
-        model_name = settings.OPENROUTER_MODEL
+        model_name = settings.FIREWORKS_MODEL
 
         # Build messages in OpenAI format
         messages = []
@@ -119,8 +117,11 @@ class OpenRouterProvider(LLMProvider):
                         "function": {"name": tool_name}
                     }
                 elif request.tool_choice == "required":
-                    # Fallback for generic required
-                    payload["tool_choice"] = "required"
+                    first_tool_name = payload["tools"][0]["function"]["name"]
+                    payload["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": first_tool_name}
+                    }
                 elif request.tool_choice == "none":
                     payload["tool_choice"] = "none"
                 else:
@@ -129,39 +130,53 @@ class OpenRouterProvider(LLMProvider):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://tegy-chatbot.com",
-            "X-Title": settings.PROJECT_NAME,
+            "Accept": "application/json",
         }
 
         try:
+            start_network = time.perf_counter()
             resp = await self._client.post(
                 f"{self.base_url}/chat/completions",
                 json=payload,
                 headers=headers,
             )
+            network_time = round((time.perf_counter() - start_network) * 1000, 2)
+            
+            from app.core.trace_context import get_active_trace
+            trace = get_active_trace()
+            if trace:
+                from app.core.observability import trace_layer_ctx
+                layer = trace_layer_ctx.get()
+                if layer in trace.layers:
+                    trace.layers[layer].network_ms += network_time
 
             if resp.status_code == 429:
-                raise AITransientException("OpenRouter rate limit exceeded (429)")
+                raise AIFatalException("Fireworks rate limit exceeded (429)")
+            if resp.status_code == 400:
+                logger.error(f"Fireworks 400 Bad Request: {resp.text}")
+                raise ValueError(f"Fireworks config error: {resp.text}")
             if resp.status_code >= 500:
-                raise AITransientException(f"OpenRouter server error: {resp.status_code}")
+                raise AITransientException(f"Fireworks server error: {resp.status_code}")
 
             resp.raise_for_status()
             data = resp.json()
 
             choice = data["choices"][0]
             message = choice["message"]
-            content = message.get("content", "")
+            content = message.get("content") or message.get("reasoning_content", "")
             usage = data.get("usage", {})
 
             # Parse tool calls for OpenAI format
             tool_calls = []
-            if "tool_calls" in message:
+            if "tool_calls" in message and message["tool_calls"]:
                 for tc in message["tool_calls"]:
-                    if tc["type"] == "function":
+                    if tc.get("type") == "function" or "function" in tc:
+                        # Some APIs skip type="function"
+                        fn = tc.get("function", tc)
                         tool_calls.append({
                             "id": tc.get("id"),
-                            "name": tc["function"]["name"],
-                            "arguments": json.loads(tc["function"]["arguments"])
+                            "name": fn.get("name"),
+                            "arguments": json.loads(fn.get("arguments", "{}"))
                         })
 
             return LLMResponse(
@@ -175,12 +190,12 @@ class OpenRouterProvider(LLMProvider):
             )
 
         except httpx.TimeoutException as exc:
-            raise AITimeoutException("OpenRouter request timed out") from exc
-        except (AITransientException, AITimeoutException):
+            raise AITimeoutException("Fireworks request timed out") from exc
+        except (AITransientException, AITimeoutException, AIFatalException):
             raise
         except Exception as exc:
-            logger.error("openrouter.generate.failed", exc_info=True)
-            raise AITransientException(f"OpenRouter provider failed: {type(exc).__name__}") from exc
+            logger.error("fireworks.generate.failed", exc_info=True)
+            raise AITransientException(f"Fireworks provider failed: {type(exc).__name__}") from exc
 
     def _lowercase_types(self, schema: dict[str, Any]) -> dict[str, Any]:
         """Recursively converts 'type' values to lowercase for OpenAI compatibility."""
@@ -202,7 +217,7 @@ class OpenRouterProvider(LLMProvider):
         return new_schema
 
     async def count_tokens(self, content: str, model: Optional[str] = None) -> int:
-        """Estimate tokens (no dedicated counting endpoint)."""
+        """Estimate tokens."""
         return max(1, int(len(content.split()) * 1.3))
 
     async def close(self) -> None:

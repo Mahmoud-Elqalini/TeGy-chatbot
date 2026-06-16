@@ -12,7 +12,8 @@ except ModuleNotFoundError:  # pragma: no cover
     structlog = None
 
 
-request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+trace_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="-")
+trace_layer_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("layer", default="unknown")
 
 
 def configure_logging(debug: bool) -> None:
@@ -42,22 +43,34 @@ def configure_logging(debug: bool) -> None:
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, format="%(message)s", stream=sys.stdout)
 
 
-def set_request_id(request_id: Optional[str] = None) -> str:
-    value = request_id or str(uuid.uuid4())
-    request_id_ctx.set(value)
+def set_trace_id(trace_id: Optional[str] = None) -> str:
+    value = trace_id or str(uuid.uuid4())
+    trace_id_ctx.set(value)
     if structlog is not None:
-        structlog.contextvars.bind_contextvars(request_id=value)
+        structlog.contextvars.bind_contextvars(trace_id=value)
     return value
 
 
-def get_request_id() -> str:
-    return request_id_ctx.get("-")
+def get_trace_id() -> str:
+    return trace_id_ctx.get("-")
 
 
-def reset_request_id() -> None:
-    request_id_ctx.set("-")
+def reset_trace_id() -> None:
+    trace_id_ctx.set("-")
     if structlog is not None:
         structlog.contextvars.clear_contextvars()
+
+
+def set_trace_layer(layer: str):
+    token = trace_layer_ctx.set(layer)
+    if structlog is not None:
+        structlog.contextvars.bind_contextvars(layer=layer)
+    return token
+
+def reset_trace_layer(token, previous_layer: str = "unknown"):
+    trace_layer_ctx.reset(token)
+    if structlog is not None:
+        structlog.contextvars.bind_contextvars(layer=previous_layer)
 
 
 def get_logger(name: Optional[str] = None):

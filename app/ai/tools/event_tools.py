@@ -10,12 +10,7 @@ from app.ai.tool_registry import ToolRegistry
 
 @ToolRegistry.register_tool(
     name="search_events",
-    description=(
-        "Semantic search for live events. "
-        "Use this when the user wants to find events, browse events, "
-        "or get recommendations for events. "
-        "This tool searches semantically, then fetches the latest event data from the original MSSQL database."
-    ),
+    description="search_events(q, limit) -> returns events list",
     parameters={
         "type": "object",
         "properties": {
@@ -25,14 +20,16 @@ from app.ai.tool_registry import ToolRegistry
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum number of events to return"
+                "description": "Maximum number of events to return (max 5)",
+                "maximum": 5,
+                "default": 5
             }
         },
         "required": ["q"]
     },
     metadata={"category": "events"}
 )
-async def search_events(q: str, limit: int = 8, main_db: AsyncSession = None, **kwargs):
+async def search_events(q: str, limit: int = 5, main_db: AsyncSession = None, **kwargs):
     """
     Pure orchestrator tool:
     1. Calls the semantic search API (Async HTTP).
@@ -64,22 +61,16 @@ async def search_events(q: str, limit: int = 8, main_db: AsyncSession = None, **
     events = []
     for ev in raw_events:
         events.append({
-            "source_id": ev.get("source_id"),
+            "id": ev.get("source_id"),
             "name": ev.get("name"),
-            "category": ev.get("category"),
-            "price": ev.get("price"),
             "start_date": ev.get("start_date"),
-            "place": ev.get("place"),
-            "city": ev.get("city"),
-            "description_summary": (ev.get("description")[:150] + "...") if ev.get("description") else None,
-            "is_online": ev.get("is_online"),
-            "ticket_count": ev.get("ticket_count"),
+            "end_date": ev.get("end_date"),
+            "location": f"{ev.get('place', '')}, {ev.get('city', '')}".strip(" ,"),
+            "price": ev.get("price"),
             "status": ev.get("status"),
+            "short_description": (ev.get("description") or "")[:200]
         })
 
     return {
-        "query": q,
-        "returned_ids": source_ids,
-        "events_found": len(events),
-        "events": events,
+        "events": events
     }

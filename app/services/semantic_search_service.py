@@ -32,7 +32,7 @@ class SemanticSearchService:
         try:
             logger.info("semantic_search.api.request", query=q, limit=limit)
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
                 response = await client.post(
                     url,
                     json={"q": q.strip(), "limit": limit}

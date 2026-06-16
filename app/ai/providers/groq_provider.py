@@ -14,7 +14,7 @@ from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
 from app.ai.providers.registry import register_provider
 from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.core.config import settings
-from app.core.exceptions import AITimeoutException, AITransientException
+from app.core.exceptions import AITimeoutException, AITransientException, AIFatalException
 from typing import Optional, Union, Any
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ class GroqProvider(LLMProvider):
         # Reuse HTTP client for connection pooling
         self._client = httpx.AsyncClient(
             timeout=settings.GROQ_TIMEOUT_SECONDS,
+            trust_env=False,
             limits=httpx.Limits(max_connections=settings.HTTP_MAX_CONNECTIONS, max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE),
         )
         # Resilience
@@ -140,14 +141,28 @@ class GroqProvider(LLMProvider):
         }
 
         try:
+            start_network = time.perf_counter()
             resp = await self._client.post(
                 f"{self.base_url}/chat/completions",
                 json=payload,
                 headers=headers,
             )
+            network_time = round((time.perf_counter() - start_network) * 1000, 2)
+            
+            from app.core.trace_context import get_active_trace
+            trace = get_active_trace()
+            if trace:
+                from app.core.observability import trace_layer_ctx
+                layer = trace_layer_ctx.get()
+                if layer in trace.layers:
+                    trace.layers[layer].network_ms += network_time
 
             if resp.status_code == 429:
-                raise AITransientException("Groq rate limit exceeded (429)")
+                raise AIFatalException("Groq rate limit exceeded (429)")
+            if resp.status_code == 400:
+                logger.error(f"Groq 400 Bad Request: {resp.text}")
+                # We can't retry 400s
+                raise ValueError(f"Groq config error: {resp.text}")
             if resp.status_code >= 500:
                 raise AITransientException(f"Groq server error: {resp.status_code}")
 
@@ -182,7 +197,7 @@ class GroqProvider(LLMProvider):
 
         except httpx.TimeoutException as exc:
             raise AITimeoutException("Groq request timed out") from exc
-        except (AITransientException, AITimeoutException):
+        except (AITransientException, AITimeoutException, AIFatalException):
             raise
         except Exception as exc:
             logger.error("groq.generate.failed", exc_info=True)

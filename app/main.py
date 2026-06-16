@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import RequestContextMiddleware
 from app.core.observability import configure_logging
-from app.db.redis import close_redis
+from app.db.redis import close_redis, get_redis
 from app.api.v1.routes import chat, health, sessions
 
 # Import core AI and service components
@@ -15,6 +15,7 @@ from app.ai.response_generator import ResponseGenerator
 from app.ai.tool_registry import ToolRegistry
 from app.ai.tools import discover_and_register
 from app.ai.prompt_loader import PromptLoader
+from app.services.cache_management import CacheManager
 from arq import create_pool
 from app.workers.arq_jobs import get_arq_redis_settings
 
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
     
     # --- Initialization Phase ---
     
-    # Initialize the provider fallback chain (Gemini -> Groq -> OpenRouter)
+    # Initialize the provider fallback chain (Groq -> Fireworks -> Gemini)
     # automatically based on configuration and priority.
     from app.ai.providers.factory import ProviderFactory
     primary_provider = ProviderFactory.initialize_provider_chain()
@@ -45,18 +46,30 @@ async def lifespan(app: FastAPI):
     # This must happen BEFORE ToolRegistry() to populate the global catalog.
     discover_and_register()
     
-    # 3. Warm the prompt cache (loads all .md/.txt files from app/ai/prompts/)
-    PromptLoader.load_all()
+    # 3. Initialize cache manager for centralized cache operations
+    redis_client = await get_redis()
+    cache_manager = CacheManager(redis_client)
     
-    # 4. Initialize tool registry (clones the global catalog)
+    # 4. Warm the cache (loads all .md/.txt files from app/ai/prompts/ and validates Redis)
+    try:
+        cache_manager.warm_prompt_cache()
+        await cache_manager.warm_redis_cache()
+        logger.info("✅ Cache warming completed successfully")
+    except Exception as e:
+        logger.warning(f"⚠️ Cache warming encountered issues: {e}")
+    
+    # 5. Initialize tool registry (clones the global catalog)
     tool_registry = ToolRegistry()
     
-    # 5. Save initialized objects to app state
+    # 6. Save initialized objects to app state
     # This makes them accessible in any route handler via `request.app.state`.
     app.state.ai_provider = primary_provider
     app.state.response_generator = response_generator
     app.state.tool_registry = tool_registry
     app.state.arq_pool = await create_pool(get_arq_redis_settings())
+    app.state.cache_manager = cache_manager
+    
+    logger.info("✅ Application startup completed")
     
     yield
     
@@ -64,19 +77,51 @@ async def lifespan(app: FastAPI):
     # This part runs when the server is shutting down.
     logger.info("Executing safe teardown procedures...")
     
-    # Close AI provider resources (httpx clients, etc.)
-    await primary_provider.close()
+    # 1. Log cache statistics before shutdown
+    try:
+        cache_stats = await cache_manager.get_cache_stats()
+        logger.info(
+            "Cache statistics before shutdown",
+            extra={
+                "redis_keys": cache_stats.redis_stats.get("database", {}).get("keys_total"),
+                "cached_prompts": cache_stats.prompt_stats.get("cache_size"),
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to gather cache stats: {e}")
     
-    # Log final provider metrics for observability
+    # 2. Close AI provider resources (httpx clients, etc.)
+    try:
+        await primary_provider.close()
+        logger.info("✅ AI provider resources closed")
+    except Exception as e:
+        logger.error(f"Error closing AI provider: {e}")
+    
+    # 3. Log final provider metrics for observability
     if hasattr(primary_provider, "get_metrics_summary"):
-        for m in primary_provider.get_metrics_summary():
-            logger.info("provider.metrics.final", extra=m)
-            
-    if hasattr(app.state, "arq_pool"):
-        await app.state.arq_pool.close()
+        try:
+            for m in primary_provider.get_metrics_summary():
+                logger.info("provider.metrics.final", extra=m)
+        except Exception as e:
+            logger.warning(f"Failed to log provider metrics: {e}")
     
-    await close_redis()
-    logger.info("Shutdown complete.")
+    # 4. Close ARQ pool
+    if hasattr(app.state, "arq_pool"):
+        try:
+            await app.state.arq_pool.close()
+            logger.info("✅ ARQ pool closed")
+        except Exception as e:
+            logger.error(f"Error closing ARQ pool: {e}")
+    
+    # 5. Close Redis connection (final cleanup)
+    try:
+        await close_redis()
+        logger.info("✅ Redis connection closed")
+    except Exception as e:
+        logger.error(f"Error closing Redis: {e}")
+    
+    logger.info("✅ Shutdown complete")
+
 
 # OpenAPI Tags for API documentation
 openapi_tags = [

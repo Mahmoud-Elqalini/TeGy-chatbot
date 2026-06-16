@@ -4,6 +4,8 @@ import uuid
 import logging
 import time
 import asyncio
+
+from app.core.perf_tracer import PerformanceTracer
 from fastapi import HTTPException, status, BackgroundTasks
 from app.core.exceptions import AppException
 
@@ -20,12 +22,17 @@ from app.schemas.chat_unified import (
     ChatMessageMetadata
 )
 from app.schemas.chat_dtos import ChatDomainRequest, ChatDomainResponse, WorkflowContext, ChatContext
+from app.ai.fast_path_router import FastPathRouter
 from app.services.chat_service import ChatService
 from app.services.idempotency_service import IdempotencyService
 from app.services.user_profile_service import UserProfileService
 from app.services.chat_persistence_service import ChatPersistenceService
 from app.services.chat_memory_service import ChatMemoryService
 from app.ai.summarizer import Summarizer
+
+from app.db.chatbot_database import ChatbotSessionLocal
+from app.repositories.message_repo import MessageRepository
+from app.repositories.session_repo import SessionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,7 @@ class ChatApplicationService:
         persistence: ChatPersistenceService,
         memory_service: ChatMemoryService,
         summarizer: Summarizer,
+        fast_path_router: Optional[FastPathRouter] = None,
     ):
         self.domain = domain
         self.tokens = token_port
@@ -58,12 +66,14 @@ class ChatApplicationService:
         self.persistence = persistence
         self.memory = memory_service
         self.summarizer = summarizer
+        self.fast_path = fast_path_router or FastPathRouter()
 
     async def execute(
         self,
         auth: AuthContext,
         api_request: ChatMessageRequest,
-        idempotency_key: Optional[str] = None
+        idempotency_key: Optional[str] = None,
+        background_tasks: Optional[BackgroundTasks] = None
     ) -> Union[ChatIntegrationResponse, ChatMessageResponse]:
         """
         Resilient Distributed Pipeline.
@@ -77,6 +87,7 @@ class ChatApplicationService:
         Token-based identity: user_id is ALWAYS resolved from AuthContext.
         """
         request_id = str(uuid.uuid4())
+        tracer = PerformanceTracer()
 
         # ── Identity Resolution (Single Source of Truth: Token) ──
         ctx = WorkflowContext(
@@ -104,6 +115,42 @@ class ChatApplicationService:
                 logger.error("circuit_breaker_open", extra=log_meta)
                 raise HTTPException(status_code=503, detail="Service unavailable")
 
+        # ── ZERO-CONTEXT FAST PATH CHECK ──
+        fast_path_result = self.fast_path.match(api_request.message)
+        if fast_path_result is not None:
+            logger.info("fast_path.zero_context_hit", extra=log_meta)
+            res_content = fast_path_result.response
+            
+            # Pre-generate session_id for new chats so we can return it instantly
+            if api_request.session_id is None:
+                api_request.session_id = uuid.uuid4()
+            
+            if background_tasks:
+                background_tasks.add_task(
+                    self._background_fast_path_finalize,
+                    ctx, api_request, res_content, fast_path_result.fast_path_type
+                )
+            else:
+                # Fallback if no background tasks provider (e.g. tests)
+                await self._background_fast_path_finalize(ctx, api_request, res_content, fast_path_result.fast_path_type)
+                
+            if ctx.auth_mode == "INTEGRATION":
+                response = ChatIntegrationResponse(response=res_content, session_id=api_request.session_id, is_new_user=False)
+            else:
+                response = ChatMessageResponse(
+                    session_id=api_request.session_id, reply=res_content, role="assistant",
+                    metadata=ChatMessageMetadata(
+                        tokens_used=0,
+                        latency_ms=int((time.time() - ctx.start_time) * 1000),
+                        perf_breakdown={"fast_path_type": fast_path_result.fast_path_type}
+                    )
+                )
+            
+            if idempotency_key:
+                await self.idempotency.save(idempotency_key, response.model_dump())
+                
+            return response
+
         # Acquire Lock
         session_key = str(api_request.session_id or ctx.user_id)
         lock_token = await self.lock.acquire(session_key, ttl=60)
@@ -113,30 +160,21 @@ class ChatApplicationService:
 
         try:
             # ═══════════════════════════════════════════════════════════════
-            # PHASE 1: GUARANTEED PERSISTENCE (always runs)
-            # Session creation + user message are committed regardless of AI outcome.
+            # PHASE 1: ASYNC PARALLEL READS
             # ═══════════════════════════════════════════════════════════════
 
-            # Step 1: Resolve Context (session creation happens here)
-            step_start = time.time()
-            ctx.is_new_user = await self.profile.sync_profile(ctx.user_id, api_request.user_profile)
-            session = await self.persistence.session_service.get_or_create_session(api_request.session_id, ctx.user_id)
-            ctx.session_id = session.session_id
-            logger.info("pipeline.step_completed", extra={**log_meta, "step": "resolve_context", "duration_ms": int((time.time() - step_start)*1000)})
+            with tracer.step("resolve_context"):
+                # Parallelize reading profile and session using gather
+                sync_task = self.profile.sync_profile(ctx.user_id, api_request.user_profile)
+                session_task = self.persistence.session_service.get_or_create_session(api_request.session_id, ctx.user_id)
+                
+                ctx.is_new_user, session = await asyncio.gather(sync_task, session_task)
+                ctx.session_id = session.session_id
 
-            # Step 2: Load Memory
-            step_start = time.time()
-            payload = await self.memory.get_conversation_context(ctx.session_id, api_request.message)
-            logger.info("pipeline.step_completed", extra={**log_meta, "step": "load_memory", "duration_ms": int((time.time() - step_start)*1000)})
+            with tracer.step("load_memory"):
+                payload = await self.memory.get_conversation_context(ctx.session_id, api_request.message)
 
-            # Step 3: Save User Message (ALWAYS — even if AI fails later)
-            step_start = time.time()
             user_tokens = await self.tokens.count_tokens(api_request.message)
-            await asyncio.wait_for(
-                self.persistence.save_message(ctx.session_id, api_request.role, api_request.message, user_tokens),
-                timeout=settings.DB_OPERATION_TIMEOUT
-            )
-            logger.info("pipeline.step_completed", extra={**log_meta, "step": "save_input", "duration_ms": int((time.time() - step_start)*1000)})
 
             # ═══════════════════════════════════════════════════════════════
             # PHASE 2: AI GENERATION (may fail — handled gracefully)
@@ -146,23 +184,22 @@ class ChatApplicationService:
             generation_failed = False
 
             try:
-                step_start = time.time()
-                context = payload.get("context") or ChatContext()
-                context.session_id = str(ctx.session_id)
-                context.user_id = str(ctx.user_id)  # ← from token, never from body
+                with tracer.step("domain_execution"):
+                    context = payload.get("context") or ChatContext()
+                    context.session_id = str(ctx.session_id)
+                    context.user_id = str(ctx.user_id)  # ← from token, never from body
 
-                domain_req = ChatDomainRequest(
-                    message=api_request.message,
-                    history=payload.get("history", []),
-                    context=context,
-                    role=api_request.role
-                )
+                    domain_req = ChatDomainRequest(
+                        message=api_request.message,
+                        history=payload.get("history", []),
+                        context=context,
+                        role=api_request.role
+                    )
 
-                domain_res = await asyncio.wait_for(
-                    self.domain.generate_response(domain_req),
-                    timeout=settings.AI_REQUEST_TIMEOUT
-                )
-                logger.info("pipeline.step_completed", extra={**log_meta, "step": "domain_execution", "duration_ms": int((time.time() - step_start)*1000)})
+                    domain_res = await asyncio.wait_for(
+                        self.domain.generate_response(domain_req),
+                        timeout=settings.AI_REQUEST_TIMEOUT
+                    )
 
             except Exception as ai_exc:
                 generation_failed = True
@@ -178,50 +215,55 @@ class ChatApplicationService:
             if generation_failed or domain_res is None:
                 # ── Fallback: Save error message as assistant response ──
                 fallback_content = "حصلت مشكلة في توليد الرد، حاول مرة تانية"
-
-                try:
-                    await asyncio.wait_for(
-                        self.persistence.save_message(
-                            ctx.session_id, "assistant", fallback_content, 0,
-                            metadata={"status": "failed_generation", "intent": "error"}
-                        ),
-                        timeout=settings.DB_OPERATION_TIMEOUT
+                
+                if background_tasks:
+                    background_tasks.add_task(
+                        self._background_persist,
+                        ctx.session_id, api_request.role, api_request.message, user_tokens,
+                        "assistant", fallback_content, 0,
+                        {"status": "failed_generation", "intent": "error"}, "error", session.current_summary
                     )
-                    await self.persistence.finalize_session(ctx.session_id, {"intent": "error", "summary": session.current_summary})
-                    logger.info("pipeline.fallback_saved", extra=log_meta)
-                except Exception as persist_exc:
-                    logger.error("pipeline.fallback_persist_failed", extra={**log_meta, "error": str(persist_exc)})
-                    # Continue anyway — user seeing a response is more important than DB persistence
-
+                else:
+                    await self._background_persist(
+                        ctx.session_id, api_request.role, api_request.message, user_tokens,
+                        "assistant", fallback_content, 0,
+                        {"status": "failed_generation", "intent": "error"}, "error", session.current_summary
+                    )
                 return self._build_fallback_response(ctx, fallback_content)
 
             else:
-                # ── Success: Save assistant response ──
-                step_start = time.time()
-                await asyncio.wait_for(
-                    self.persistence.save_message(
-                        ctx.session_id, domain_res.role, domain_res.content, domain_res.ai_tokens,
-                        metadata={"intent": domain_res.intent, "route": domain_res.route}
-                    ),
-                    timeout=settings.DB_OPERATION_TIMEOUT
-                )
-                logger.info("pipeline.step_completed", extra={**log_meta, "step": "save_output", "duration_ms": int((time.time() - step_start)*1000)})
+                # ── Success: Save messages in BACKGROUND ──
+                with tracer.step("queue_background_writes"):
+                    metadata = {"intent": domain_res.intent, "route": domain_res.route}
+                    if background_tasks:
+                        background_tasks.add_task(
+                            self._background_persist,
+                            ctx.session_id, api_request.role, api_request.message, user_tokens,
+                            domain_res.role, domain_res.content, domain_res.ai_tokens,
+                            metadata, domain_res.intent, session.current_summary
+                        )
+                    else:
+                        await self._background_persist(
+                            ctx.session_id, api_request.role, api_request.message, user_tokens,
+                            domain_res.role, domain_res.content, domain_res.ai_tokens,
+                            metadata, domain_res.intent, session.current_summary
+                        )
 
-                # Memory Persist & Background Summarization
-                step_start = time.time()
-                should_summarize, updated_history = await self.memory.persist_interaction(
-                    ctx.session_id, api_request.message, domain_res.content, domain_res.intent
-                )
-
-                await self.persistence.finalize_session(ctx.session_id, {"intent": domain_res.intent, "summary": session.current_summary})
-                logger.info("pipeline.step_completed", extra={**log_meta, "step": "finalize", "duration_ms": int((time.time() - step_start)*1000)})
+                # Memory Persist (Redis is fast, can be done inline or background. We keep inline for fast context updates)
+                with tracer.step("memory_persist_and_finalize"):
+                    should_summarize, updated_history = await self.memory.persist_interaction(
+                        ctx.session_id, api_request.message, domain_res.content, domain_res.intent
+                    )
 
                 # Response construction
-                response = self._build_api_response(ctx, domain_res)
-                if idempotency_key:
-                    await self.idempotency.save(idempotency_key, response.model_dump())
+                with tracer.step("build_response"):
+                    response = self._build_api_response(ctx, domain_res, tracer=tracer)
+                    if idempotency_key:
+                        await self.idempotency.save(idempotency_key, response.model_dump())
 
-                logger.info("pipeline_success", extra={**log_meta, "latency_ms": int((time.time() - ctx.start_time)*1000)})
+                # ═══ PERFORMANCE BREAKDOWN LOG ═══
+                tracer.log_summary(logger, request_id=request_id, user_id=str(ctx.user_id), session_id=str(ctx.session_id))
+                logger.info("pipeline_success", extra={**log_meta, "latency_ms": int((time.time() - ctx.start_time)*1000), "perf_breakdown": tracer.as_dict()})
                 return response
 
         except (HTTPException, AppException) as e:
@@ -234,13 +276,24 @@ class ChatApplicationService:
         finally:
             await self.lock.release(session_key, lock_token)
 
-    def _build_api_response(self, ctx: WorkflowContext, res: ChatDomainResponse) -> Union[ChatIntegrationResponse, ChatMessageResponse]:
+    def _build_api_response(
+        self, ctx: WorkflowContext, res: ChatDomainResponse, tracer: Optional[PerformanceTracer] = None
+    ) -> Union[ChatIntegrationResponse, ChatMessageResponse]:
         content = res.content or "عذراً، لم أستطع العثور على رد مناسب حالياً. يرجى المحاولة مرة أخرى."
         if ctx.auth_mode == "INTEGRATION":
             return ChatIntegrationResponse(response=content, session_id=ctx.session_id, is_new_user=ctx.is_new_user)
+        
+        perf = tracer.as_dict() if tracer and settings.DEBUG else None
+        if perf:
+            perf["token_usage"] = res.token_breakdown
+            
         return ChatMessageResponse(
             session_id=ctx.session_id, reply=content, role=res.role,
-            metadata=ChatMessageMetadata(tokens_used=res.ai_tokens, latency_ms=int((time.time() - ctx.start_time) * 1000))
+            metadata=ChatMessageMetadata(
+                tokens_used=res.ai_tokens,
+                latency_ms=int((time.time() - ctx.start_time) * 1000),
+                perf_breakdown=perf
+            )
         )
 
     def _build_fallback_response(self, ctx: WorkflowContext, fallback_content: str) -> Union[ChatIntegrationResponse, ChatMessageResponse]:
@@ -251,3 +304,73 @@ class ChatApplicationService:
             session_id=ctx.session_id, reply=fallback_content, role="assistant",
             metadata=ChatMessageMetadata(tokens_used=0, latency_ms=int((time.time() - ctx.start_time) * 1000))
         )
+
+    async def _background_fast_path_finalize(
+        self, ctx: WorkflowContext, api_request: ChatMessageRequest, 
+        ai_content: str, intent: str
+    ):
+        """
+        Runs context resolution and persistence IN THE BACKGROUND for Fast Path hits.
+        This allows the user to get a sub-100ms response while DB/Redis syncs silently.
+        """
+        try:
+            # 1. Resolve Context (create session, sync profile)
+            sync_task = self.profile.sync_profile(ctx.user_id, api_request.user_profile)
+            session_task = self.persistence.session_service.get_or_create_session(api_request.session_id, ctx.user_id)
+            ctx.is_new_user, session = await asyncio.gather(sync_task, session_task)
+            ctx.session_id = session.session_id
+            
+            user_tokens = await self.tokens.count_tokens(api_request.message)
+            
+            # 2. Persist in SQL
+            await self._background_persist(
+                ctx.session_id, api_request.role, api_request.message, user_tokens,
+                "assistant", ai_content, 0,
+                {"intent": intent, "route": "fast_path"}, intent, session.current_summary
+            )
+            
+            # 3. Persist in Redis
+            await self.memory.persist_interaction(
+                ctx.session_id, api_request.message, ai_content, intent
+            )
+            logger.info("background_fast_path_finalized", extra={"session_id": str(ctx.session_id)})
+        except Exception as e:
+            logger.error("background_fast_path_failed", extra={"error": str(e)}, exc_info=True)
+
+    async def _background_persist(
+        self, session_id, user_role, user_content, user_tokens,
+        ai_role, ai_content, ai_tokens, metadata, intent, summary
+    ):
+        """
+        Executes writes in the background using a NEW database session.
+        This prevents connection closed errors when FastAPI returns the response.
+        """
+        async with ChatbotSessionLocal() as bg_session:
+            try:
+                msg_repo = MessageRepository(bg_session)
+                session_repo = SessionRepository(bg_session)
+                
+                # 1. Insert User Message
+                await msg_repo.create({
+                    "session_id": session_id, "role": user_role, 
+                    "content": user_content, "token_count": user_tokens
+                }, commit=False)
+                
+                # 2. Insert Assistant Message
+                await msg_repo.create({
+                    "session_id": session_id, "role": ai_role, 
+                    "content": ai_content, "token_count": ai_tokens, "metadata": metadata
+                }, commit=False)
+                
+                # 3. Update Session Intent
+                session_obj = await session_repo.get(session_id)
+                if session_obj:
+                    await session_repo.update(session_obj, {
+                        "current_intent": intent, "current_summary": summary
+                    }, commit=False)
+                
+                await bg_session.commit()
+                logger.info("background_persistence_success", extra={"session_id": str(session_id)})
+            except Exception as e:
+                await bg_session.rollback()
+                logger.error("background_persistence_failed", extra={"session_id": str(session_id), "error": str(e)}, exc_info=True)

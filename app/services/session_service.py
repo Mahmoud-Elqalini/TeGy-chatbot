@@ -45,7 +45,33 @@ class SessionService:
     async def get_or_create_session(self, session_id: Optional[uuid.UUID], user_id: uuid.UUID) -> Any:
         """Ensures a session exists and is initialized in memory."""
         if session_id:
-            session = await self.get_session_model_for_user(session_id, user_id)
+            # OPTIMIZATION 1: Check Redis cache first to avoid DB read
+            try:
+                existing_ctx = await self.memory.load_context(str(session_id))
+                if existing_ctx:
+                    # Faster & secure Early Rejection
+                    if existing_ctx.user_id != str(user_id):
+                        raise SessionNotFoundException("Session not found or inaccessible.")
+                    
+                    from app.models.chatbot.session import Session
+                    return Session(
+                        session_id=uuid.UUID(existing_ctx.session_id),
+                        user_id=uuid.UUID(existing_ctx.user_id),
+                        channel=existing_ctx.channel,
+                        current_intent=existing_ctx.current_intent,
+                        current_summary=existing_ctx.current_summary,
+                        system_prompt=existing_ctx.system_prompt
+                    )
+            except SessionNotFoundException:
+                raise
+            except Exception as e:
+                logger.warning(f"Failed to read session cache for {session_id}: {e}")
+
+            try:
+                session = await self.get_session_model_for_user(session_id, user_id)
+            except SessionNotFoundException:
+                session = await self.create_session(SessionCreate(title="New Chat"), user_id, session_id=session_id)
+                return session # create_session already handles memory sync
         else:
             session = await self.create_session(SessionCreate(title="New Chat"), user_id)
             return session # create_session already handles memory sync
@@ -68,20 +94,24 @@ class SessionService:
             
         return session
 
-    async def create_session(self, session_in: SessionCreate, user_id: uuid.UUID) -> Any:
+    async def create_session(self, session_in: SessionCreate, user_id: uuid.UUID, session_id: Optional[uuid.UUID] = None) -> Any:
         """Creates a new session in DB and initializes memory."""
         if not user_id:
             raise ValidationException("user_id cannot be null")
 
         system_prompt = await self._resolve_system_prompt(session_in)
 
-        session = await self.session_repo.create({
+        obj_in = {
             "user_id": user_id,
             "title": session_in.title,
             "channel": session_in.channel or "web",
             "model_setting_id": session_in.model_setting_id,
             "system_prompt": system_prompt
-        })
+        }
+        if session_id:
+            obj_in["session_id"] = session_id
+            
+        session = await self.session_repo.create(obj_in)
         
         context = SessionContext(
             session_id=str(session.session_id),

@@ -96,6 +96,23 @@ class IdempotencyService:
         return "proceed", None
 
     # -------------------------------------------------------------
+    # Simple cache read (used by ChatApplicationService)
+    # -------------------------------------------------------------
+    async def get(self, idempotency_key: str) -> Optional[dict]:
+        """
+        Returns the cached result for *idempotency_key*, or None if not cached.
+        This is the lightweight read-only variant used before entering the pipeline.
+        """
+        result_key, _ = self._keys(idempotency_key)
+        raw = await self.redis.get(result_key)
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+
+    # -------------------------------------------------------------
     # Save result after successful processing
     # -------------------------------------------------------------
     async def save(self, idempotency_key: str, result: dict) -> None:
@@ -114,7 +131,4 @@ class IdempotencyService:
             ttl=86400,
         )
 
-        await self.redis.delete(lock_key)
-
-
-        
+        await self.redis.delete(lock_key)

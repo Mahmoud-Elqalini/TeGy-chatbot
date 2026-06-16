@@ -1,5 +1,6 @@
 import uuid
 import json
+import logging
 from typing import Any, Dict, List
 from app.core.config import settings
 from app.core.ports.state import StatePort
@@ -14,6 +15,7 @@ class ChatMemoryService:
     """
 
     def __init__(self, state_port: StatePort, message_service: Any = None, arq_pool: Any = None):
+        self.logger = logging.getLogger(__name__)
         self.state = state_port
         self.messages = message_service
         self.arq_pool = arq_pool
@@ -67,11 +69,16 @@ class ChatMemoryService:
         history_key = f"chat:session:{session_id}:history"
         count_key = f"chat:session:{session_id}:count"
         
-        # 1. Update History Cache (Point 1 Hardening: Pure Cache Invalidation)
-        # Instead of full history rebuild or mutated append, we invalidate the cache.
-        # This ensures the DB remains the ONLY source of truth.
-        # The next 'get_conversation_context' will refill the cache from DB.
-        await self.state.delete_state(history_key)
+        # 1. Optimistic History Update (Write-Through)
+        try:
+            history = await self.state.get_state(history_key)
+            if history is not None:
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": assistant_msg})
+                history = history[-settings.CHAT_MAX_HISTORY:]
+                await self.state.set_state(history_key, history, ttl=86400)
+        except Exception as e:
+            self.logger.warning(f"Failed to optimistically update redis history: {e}")
 
         # 2. Update Intent/Context
         context_key = f"chat:session:{session_id}:context"

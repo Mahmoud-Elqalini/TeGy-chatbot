@@ -11,7 +11,7 @@ from app.repositories.chatbot_user_repo import ChatbotUserRepository
 
 @ToolRegistry.register_tool(
     name="get_user_profile",
-    description="Fetch the current user's profile and settings from the database.",
+    description="get_user_profile() -> returns user profile and settings",
     parameters={"type": "object", "properties": {}},
     metadata={"roles": ["user", "admin"]}
 )

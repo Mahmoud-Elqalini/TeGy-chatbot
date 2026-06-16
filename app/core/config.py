@@ -64,11 +64,13 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     GROQ_TIMEOUT_SECONDS: int = 30
 
-    # OpenRouter Fallback
-    OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "google/gemma-4-26b-a4b-it:free"
-    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_TIMEOUT_SECONDS: int = 60
+    # Fireworks Fallback
+    FIREWORKS_API_KEY: str = ""
+    FIREWORKS_BASE_URL: str = "https://api.fireworks.ai/inference/v1"
+    FIREWORKS_MODEL: str = "accounts/fireworks/models/qwen-v2p5-14b-instruct"
+    FIREWORKS_TIMEOUT_SECONDS: int = 30
+
+
 
     ARQ_QUEUE_NAME: str = "chatbot-jobs"
     ARQ_REDIS_SETTINGS_HOST: Optional[str] = None

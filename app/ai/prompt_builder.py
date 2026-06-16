@@ -6,8 +6,18 @@ from app.schemas.chat_dtos import ChatContext
 
 class PromptBuilder:
     def build_system_prompt(self, context: ChatContext, detected_intent: Optional[str] = None) -> str:
-        parts = [PromptLoader.get_default_system()]
-
+        parts = [PromptLoader.load("core_system")]
+        
+        # Determine active intent
+        intent = detected_intent or context.current_intent
+        
+        # Load phase-specific rules based on intent
+        if intent == "booking":
+            parts.append(PromptLoader.load("phase_booking"))
+        elif intent == "manage_booking":
+            parts.append(PromptLoader.load("phase_management"))
+        elif intent == "discover":
+            parts.append(PromptLoader.load("phase_discovery"))
             
         parts.append(
             "--- SYSTEM ARCHITECTURE CONSTRAINTS ---\n"
@@ -22,6 +32,15 @@ class PromptBuilder:
             parts.append(f"Detected user intent for this turn: {detected_intent}")
         if context.channel:
             parts.append(f"Channel: {context.channel}")
+        return "\n\n".join(parts)
+
+    def build_renderer_prompt(self, context: ChatContext) -> str:
+        """Isolated prompt specifically for the Renderer Engine."""
+        parts = [PromptLoader.load("synthesis_policy")]
+        
+        # Only add metadata, NO full rules or identity.
+        if context.current_summary:
+            parts.append(f"Conversation summary:\n{context.current_summary}")
         return "\n\n".join(parts)
 
     def build_history(self, messages: list[dict[str, Any]], max_messages: int = 12) -> list[dict[str, Any]]:

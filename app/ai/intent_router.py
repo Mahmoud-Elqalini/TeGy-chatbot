@@ -40,7 +40,7 @@ class IntentRouter:
 
         # 1. Evaluate Confidence & Source
         if confidence >= self.high_threshold:
-            decision["route"] = "fast_path" if intent == "booking" else "llm_path"
+            decision["route"] = "fast_path" if intent in {"booking", "greeting"} else "llm_path"
         elif confidence >= self.medium_threshold:
             decision["is_uncertain"] = True
             decision["route"] = "llm_path"
@@ -48,7 +48,9 @@ class IntentRouter:
             decision["route"] = "fallback_path"
 
         # 2. Intent-specific overrides
-        if intent == "general":
+        if intent == "greeting":
+            decision["route"] = "fast_path"
+        elif intent == "general":
             decision["route"] = "llm_path"
         elif intent.startswith("support_") and confidence >= self.high_threshold:
             # High confidence support still goes to LLM but marked for knowledge enhancement

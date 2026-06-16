@@ -2,14 +2,19 @@ from __future__ import annotations
 from app.core.config import settings
 
 import time
+import copy
+from datetime import datetime
 from typing import Optional, Union, Any, List, Dict
 
+from app.ai.fast_path_router import FastPathRouter
 from app.ai.providers.base import LLMRequest, LLMResponse
 from app.ai.prompt_loader import PromptLoader
 from app.ai.response_generator import ResponseGenerator
 from app.ai.safety import ResponseValidator
+from app.ai.template_engine import TemplateEngine
 from app.ai.tool_registry import ToolRegistry
-from app.core.observability import get_logger
+from app.core.observability import get_logger, set_trace_id, set_trace_layer, reset_trace_layer
+from app.core.trace_context import RequestTrace, set_active_trace, reset_active_trace, get_active_trace
 
 logger = get_logger(__name__)
 
@@ -31,11 +36,16 @@ class AIOrchestrator:
         response_validator: ResponseValidator,
         tool_registry: Optional[ToolRegistry] = None,
         runtime_deps: Optional[Dict[str, Any]] = None,
+        fast_path_router: Optional[FastPathRouter] = None,
+        template_engine: Optional[TemplateEngine] = None,
     ):
         self.response_generator = response_generator
         self.response_validator = response_validator
         self.tool_registry = tool_registry
         self.runtime_deps = runtime_deps or {}
+        # Optimisation layers — defaulted so existing callers need no changes
+        self.fast_path_router: FastPathRouter = fast_path_router or FastPathRouter()
+        self.template_engine: TemplateEngine = template_engine or TemplateEngine()
 
     def _is_valid_tool_call(self, tool_calls: Optional[List], expected_tool: str) -> bool:
         if not tool_calls or not isinstance(tool_calls, list):
@@ -121,9 +131,18 @@ class AIOrchestrator:
 
             try:
                 logger.info("tool.execution_started", tool_name=name, call_id=call_id)
+                start_tool = time.perf_counter()
                 result = await self.tool_registry.call_tool(
                     name, runtime_deps=tool_deps, **args
                 )
+                tool_time = round((time.perf_counter() - start_tool) * 1000, 2)
+                
+                trace = get_active_trace()
+                if trace:
+                    from app.core.observability import trace_layer_ctx
+                    layer = trace_layer_ctx.get()
+                    if layer in trace.layers:
+                        trace.layers[layer].tool_ms += tool_time
 
                 if isinstance(result, str):
                     result = self.response_validator.sanitize_tool_output(result)
@@ -148,9 +167,64 @@ class AIOrchestrator:
         payload: dict,
         session_id: Any,
         route: str = "llm_path",
-    ) -> tuple[str, int, list[dict]]:
+    ) -> tuple[str, int, list[dict], dict[str, int]]:
+        """
+        Dispatch entry point.
+
+        Routing logic:
+          1. If route == "fast_path", try FastPathRouter first.
+             - On match  → return immediately, zero LLM calls.
+             - On miss   → fall through to _execute_llm_path().
+             (Fixes the pre-existing bug where booking → fast_path incorrectly
+             hit a barebones LLM call with no tools or system prompt.)
+          2. Everything else → _execute_llm_path().
+        """
         if route == "fast_path":
-            return await self._execute_fast_path(user_input, intent)
+            # NOTE: This is now a SECONDARY SAFETY FALLBACK check.
+            # The PRIMARY zero-context fast path check happens upstream in ChatApplicationService.execute().
+            # This remains here to catch any internal reroutes or direct Orchestrator calls.
+            fp_result = self.fast_path_router.match(user_input)
+            if fp_result is not None:
+                # ── Build a minimal trace so logs are consistent ──────────
+                trace_id = set_trace_id()
+                trace = RequestTrace(
+                    trace_id=trace_id,
+                    fast_path_used=True,
+                    fast_path_type=fp_result.fast_path_type,
+                    planner_skipped=True,
+                    renderer_skipped=True,
+                    skip_reason="fast_path",
+                    end_to_end_ms=fp_result.end_to_end_ms,
+                    saved_planner_tokens=fp_result.saved_planner_tokens,
+                    saved_renderer_tokens=fp_result.saved_renderer_tokens,
+                    saved_total_tokens=fp_result.saved_total_tokens,
+                )
+                trace_token = set_active_trace(trace)
+                logger.info(
+                    "request.trace",
+                    trace=trace.model_dump(),
+                )
+                reset_active_trace(trace_token)
+
+                return (
+                    fp_result.response,
+                    0,
+                    [],
+                    {
+                        "fast_path_tokens": 0,
+                        "saved_planner_tokens": fp_result.saved_planner_tokens,
+                        "saved_renderer_tokens": fp_result.saved_renderer_tokens,
+                        "saved_total_tokens": fp_result.saved_total_tokens,
+                        "fast_path_type": fp_result.fast_path_type,
+                    },
+                )
+            # Miss → fall through to full LLM path (fixes booking routing bug)
+            logger.info(
+                "fast_path.miss_fallthrough",
+                intent=intent,
+                note="Routing to llm_path — no social pattern matched.",
+            )
+
         return await self._execute_llm_path(user_input, intent, payload, session_id)
 
     def _sanitize_tool_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -198,7 +272,7 @@ class AIOrchestrator:
                 retry_request = LLMRequest(
                     model=request.model,
                     system_prompt=(
-                PromptLoader.get_default_system() +
+                        request.system_prompt +
                         f"\n\n[CRITICAL: You MUST call the '{tool_hint}' tool now. Text responses are forbidden.]"
                     ),
                     history=request.history,
@@ -213,15 +287,12 @@ class AIOrchestrator:
         return response
 
     async def _render_step(
-        self, request: LLMRequest, tool_results: list, session_id: Any
+        self, request: LLMRequest, tool_results: list, session_id: Any, renderer_prompt: str
     ) -> LLMResponse:
         """Final synthesis turn (Blind Renderer)."""
         synthesis_request = LLMRequest(
             model=request.model,
-            system_prompt=(
-                PromptLoader.get_default_system() +
-                "\n\n" + PromptLoader.load("synthesis_policy")
-            ),
+            system_prompt=renderer_prompt,
             history=request.history,
             user_input=request.user_input,
             tool_results=tool_results,
@@ -231,44 +302,178 @@ class AIOrchestrator:
 
     async def _execute_llm_path(
         self, user_input: str, intent: str, payload: dict, session_id: Any
-    ) -> tuple[str, int, list[dict]]:
-        """Coordinates the 3 Engines with Soft-First Enforcement."""
-        
+    ) -> tuple[str, int, list[dict], dict[str, int]]:
+        """Coordinates the 3 Engines with Soft-First Enforcement and Full Observability."""
+        pipeline_start = time.perf_counter()
+
+        # 1. Initialize Tracing
+        trace_id = set_trace_id()
+        trace = RequestTrace(trace_id=trace_id, planner_executed=True)
+        trace_token = set_active_trace(trace)
+
         tool_hint = INTENT_TOOL_MAP.get(intent)
+
+        current_date_str = datetime.now().strftime("%Y-%m-%d %A")
+        system_clock_str = f"\n\n[SYSTEM CLOCK: Today is {current_date_str}]"
+
+        sys_prompt = payload.get("system_prompt", PromptLoader.get_default_system())
+        if "[SYSTEM CLOCK" not in sys_prompt:
+            sys_prompt += system_clock_str
 
         # Initial Request: Natural reasoning (Soft)
         request = LLMRequest(
             model=payload["model"],
-            system_prompt=PromptLoader.get_default_system(),
+            system_prompt=sys_prompt,
             history=self.response_validator.sanitize_history(payload.get("history", [])),
             user_input=user_input,
-            tool_choice="auto", # Let the model decide naturally first
+            tool_choice="auto",  # Let the model decide naturally first
             metadata={"intent": intent, "session_id": session_id},
         )
 
         total_tokens = 0
+        token_breakdown: Dict[str, Any] = {
+            "planner_prompt_tokens": 0,
+            "planner_completion_tokens": 0,
+            "renderer_prompt_tokens": 0,
+            "renderer_completion_tokens": 0,
+            "tool_result_tokens": 0,
+        }
 
-        # Step 1: PLANNER ENGINE (Soft first, then Hard on retry)
+        # ── Step 1: PLANNER ENGINE ────────────────────────────────────────
+        layer_token = set_trace_layer("planner")
+        start_ms = time.perf_counter()
         plan_response = await self._plan_step(request, tool_hint, session_id)
-        total_tokens += plan_response.prompt_tokens + plan_response.completion_tokens
+        trace.layers["planner"].total_ms = round((time.perf_counter() - start_ms) * 1000, 2)
+        reset_trace_layer(layer_token)
+
+        plan_toks = plan_response.prompt_tokens + plan_response.completion_tokens
+        total_tokens += plan_toks
+        token_breakdown["planner_prompt_tokens"] = plan_response.prompt_tokens
+        token_breakdown["planner_completion_tokens"] = plan_response.completion_tokens
 
         if tool_hint and not self._is_valid_tool_call(plan_response.tool_calls, tool_hint):
             logger.error("tool.enforcement.failed", extra={"intent": intent, "tool": tool_hint})
-            return "عذراً، حدث خطأ مؤقت. من فضلك حاول مرة أخرى. 🙏", total_tokens, []
+            trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
+            logger.info("request.trace", trace=trace.model_dump())
+            reset_active_trace(trace_token)
+            return "عذراً، حدث خطأ مؤقت. من فضلك حاول مرة أخرى. 🙏", total_tokens, [], token_breakdown
 
-        # Step 2: EXECUTION ENGINE (with Semantic Firewall)
-        user_id = payload.get("context").user_id if payload.get("context") else None
-        tool_results = await self._execute_step(plan_response, session_id, user_id=user_id)
+        tool_results: List[Dict[str, Any]] = []
 
-        # Step 3: RENDERER ENGINE
+        # ── Step 2: EXECUTION ENGINE (with Semantic Firewall) ─────────────
         if plan_response.tool_calls:
-            render_response = await self._render_step(request, tool_results, session_id)
-            total_tokens += render_response.prompt_tokens + render_response.completion_tokens
-            return render_response.content, total_tokens, tool_results
+            layer_token = set_trace_layer("execution")
+            start_ms = time.perf_counter()
+            user_id = payload.get("context").user_id if payload.get("context") else None
+            tool_results = await self._execute_step(plan_response, session_id, user_id=user_id)
+            trace.layers["execution"].total_ms = round((time.perf_counter() - start_ms) * 1000, 2)
+            reset_trace_layer(layer_token)
 
-        return plan_response.content, total_tokens, []
+        # ── Step 3: CONDITIONAL RENDERER ENGINE ──────────────────────────
+        if plan_response.tool_calls:
+            # OPTIMIZATION: Strip heavy fields before passing to Renderer
+            renderer_tool_results = copy.deepcopy(tool_results)
+            for tr in renderer_tool_results:
+                if "output" in tr and isinstance(tr["output"], dict):
+                    if "events" in tr["output"] and isinstance(tr["output"]["events"], list):
+                        for ev in tr["output"]["events"]:
+                            if isinstance(ev, dict):
+                                ev.pop("short_description", None)
 
-    async def _execute_fast_path(self, user_input: str, intent: str) -> tuple[str, int, List[Dict[str, Any]]]:
+            if hasattr(self.response_generator.provider, "count_tokens"):
+                tool_toks = await self.response_generator.provider.count_tokens(str(renderer_tool_results))
+            else:
+                tool_toks = len(str(renderer_tool_results)) // 4
+
+            trace.tool_result_tokens = tool_toks
+            if tool_toks > 1500:
+                logger.warning("tool_results_too_large", tool_result_tokens=tool_toks, session_id=session_id)
+
+            token_breakdown["tool_result_tokens"] = tool_toks
+
+            # ── Template path: try to skip the Renderer entirely ──────────
+            template_result = self.template_engine.match(tool_results)
+
+            if template_result is not None:
+                # Renderer skipped — return template response directly
+                trace.renderer_skipped = True
+                trace.renderer_executed = False
+                trace.skip_reason = template_result.skip_reason
+                trace.saved_renderer_tokens = template_result.saved_renderer_tokens
+                trace.saved_total_tokens = template_result.saved_renderer_tokens
+                trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
+
+                token_breakdown["renderer_prompt_tokens"] = 0
+                token_breakdown["renderer_completion_tokens"] = 0
+                token_breakdown["saved_renderer_tokens"] = template_result.saved_renderer_tokens
+
+                logger.info(
+                    "renderer.skipped",
+                    skip_reason=template_result.skip_reason,
+                    saved_tokens=template_result.saved_renderer_tokens,
+                    session_id=session_id,
+                )
+                logger.info("request.trace", trace=trace.model_dump())
+                reset_active_trace(trace_token)
+                return template_result.response, total_tokens, tool_results, token_breakdown
+
+            # ── Renderer path: full synthesis LLM call ────────────────────
+            trace.renderer_executed = True
+            layer_token = set_trace_layer("renderer")
+            start_ms = time.perf_counter()
+            renderer_prompt = payload.get("renderer_prompt", PromptLoader.load("synthesis_policy"))
+            if "[SYSTEM CLOCK" not in renderer_prompt:
+                renderer_prompt += system_clock_str
+            render_response = await self._render_step(request, renderer_tool_results, session_id, renderer_prompt)
+            trace.layers["renderer"].total_ms = round((time.perf_counter() - start_ms) * 1000, 2)
+            reset_trace_layer(layer_token)
+
+            render_toks = render_response.prompt_tokens + render_response.completion_tokens
+            total_tokens += render_toks
+            token_breakdown["renderer_prompt_tokens"] = render_response.prompt_tokens
+            token_breakdown["renderer_completion_tokens"] = render_response.completion_tokens
+
+            trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
+            logger.info("request.trace", trace=trace.model_dump())
+            reset_active_trace(trace_token)
+            return render_response.content, total_tokens, tool_results, token_breakdown
+
+        trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
+        logger.info("request.trace", trace=trace.model_dump())
+        reset_active_trace(trace_token)
+        return plan_response.content, total_tokens, [], token_breakdown
+
+    # -------------------------------------------------------------------------
+    # _execute_fast_path — DEPRECATED
+    # -------------------------------------------------------------------------
+    # This method was the original, incomplete fast-path handler.  It only had
+    # a special case for "greeting" and silently fell through to a barebones
+    # LLM call (no tools, no system prompt) for all other intents — including
+    # "booking", which the IntentRouter also routed to fast_path.
+    #
+    # BUG (pre-fix):
+    #   intent=booking → route=fast_path → _execute_fast_path()
+    #   → no greeting match → LLMRequest(system_prompt="Quick assistant.", tools=None)
+    #   → booking attempt answered without search_events / create_booking tools
+    #   → nonsensical or hallucinated response
+    #
+    # FIX:
+    #   generate_complex() now calls FastPathRouter.match() instead.
+    #   FastPathRouter handles only social intents (greeting/identity/thanks/goodbye).
+    #   Any other intent (including booking) that arrives via route=fast_path
+    #   gets a FastPathRouter miss and falls through to _execute_llm_path(),
+    #   where the full Planner + tool + Renderer pipeline runs correctly.
+    #
+    # This method is retained for reference and backward compatibility but is
+    # no longer called by generate_complex().
+    async def _execute_fast_path(  # noqa: dead-code
+        self, user_input: str, intent: str
+    ) -> tuple[str, int, List[Dict[str, Any]], dict[str, int]]:
+        """[DEPRECATED] Superseded by FastPathRouter + generate_complex() dispatch."""
+        if intent == "greeting":
+            content = "أهلا بيك! أقدر أساعدك في إيه؟"
+            return content, 0, [], {"fast_path_tokens": 0}
+
         request = LLMRequest(
             model=settings.GEMINI_MODEL,
             system_prompt="Quick assistant.",
@@ -280,4 +485,6 @@ class AIOrchestrator:
         content = response.content
         if tool_results:
             content = f"Action completed: {tool_results[0].get('output')}"
-        return content, response.completion_tokens, tool_results
+
+        toks = response.prompt_tokens + response.completion_tokens
+        return content, toks, tool_results, {"fast_path_tokens": toks}

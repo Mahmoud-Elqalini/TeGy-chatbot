@@ -47,8 +47,8 @@ class PromptLoader:
 
     @classmethod
     def get_default_system(cls) -> str:
-        """Convenience helper — loads 'default_system' prompt."""
-        return cls.load("default_system")
+        """Convenience helper — loads 'core_system' prompt."""
+        return cls.load("core_system")
 
     @classmethod
     def hot_reload(cls, name: str) -> str:

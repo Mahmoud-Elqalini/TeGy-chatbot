@@ -9,7 +9,7 @@ from app.ai.tool_registry import ToolRegistry
 
 @ToolRegistry.register_tool(
     name="search_orders",
-    description="Find all past orders made by the user.",
+    description="search_orders() -> returns past user orders",
     parameters={"type": "object", "properties": {}},
     metadata={"category": "orders"}
 )

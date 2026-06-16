@@ -129,6 +129,7 @@ class MainEventRepository:
                 SoldOutTime AS sold_out_time
             FROM dbo.Events
             WHERE Id IN ({in_placeholders})
+              AND COALESCE(EndDate, StartDate) >= GETUTCDATE()
             ORDER BY
                 CASE Id
                     {order_cases}

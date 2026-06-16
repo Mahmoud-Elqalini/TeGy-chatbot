@@ -18,7 +18,8 @@ import time
 from typing import Optional, Union, List
 
 from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
-from app.core.exceptions import AITransientException, AITimeoutException, LLMUnavailableException
+from app.core.exceptions import AITransientException, AITimeoutException, LLMUnavailableException, AIFatalException
+from app.core.trace_context import get_active_trace
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +95,21 @@ class FallbackProvider(LLMProvider):
                 if provider == self.providers[0] and request.model:
                     fallback_request.model = request.model
 
+                trace = get_active_trace()
+                if trace:
+                    from app.core.observability import trace_layer_ctx
+                    layer = trace_layer_ctx.get()
+                    if layer in trace.layers:
+                        trace.layers[layer].retry_count += 1
+                    trace.fallback_chain.append(provider.provider_name)
+
                 start = time.perf_counter()
                 response = await provider.generate(fallback_request)
                 latency_ms = (time.perf_counter() - start) * 1000
+                
+                if trace and layer in trace.layers:
+                    trace.layers[layer].llm_ms += round(latency_ms, 2)
+                    trace.layers[layer].provider = provider.provider_name
 
                 # Log successful recovery or backup usage
                 if provider != ranked_providers[0]:
@@ -111,7 +124,7 @@ class FallbackProvider(LLMProvider):
 
                 return response
 
-            except (AITransientException, AITimeoutException) as exc:
+            except (AITransientException, AITimeoutException, AIFatalException) as exc:
                 error_msg = str(exc)
                 logger.warning(
                     f"fallback.provider_failed: {provider.provider_name} | Error: {error_msg}",
@@ -122,6 +135,30 @@ class FallbackProvider(LLMProvider):
                     }
                 )
                 last_exception = exc
+                
+                trace = get_active_trace()
+                if trace:
+                    reason = "unknown"
+                    status_code = None
+                    exc_str = str(exc).lower()
+                    if "429" in exc_str or "rate limit" in exc_str:
+                        reason = "rate_limit"
+                        status_code = 429
+                    elif "400" in exc_str or "config" in exc_str:
+                        reason = "bad_request"
+                        status_code = 400
+                    elif "timeout" in exc_str:
+                        reason = "timeout"
+                    else:
+                        reason = type(exc).__name__
+                        
+                    trace.errors.append({
+                        "provider": provider.provider_name,
+                        "reason": reason,
+                        "status_code": status_code,
+                        "details": str(exc)
+                    })
+                    
                 continue
 
             except Exception as exc:
@@ -130,6 +167,16 @@ class FallbackProvider(LLMProvider):
                     extra={"provider": provider.provider_name, "error": str(exc)}
                 )
                 last_exception = exc
+                
+                trace = get_active_trace()
+                if trace:
+                    trace.errors.append({
+                        "provider": provider.provider_name,
+                        "reason": "unexpected_error",
+                        "status_code": None,
+                        "details": str(exc)
+                    })
+                
                 continue
 
         # 3. Exhaustion: All health-checked options failed

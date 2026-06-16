@@ -37,12 +37,7 @@ def trim_history_fifo(messages: List[Any], max_tokens: int) -> List[Any]:
 
 @ToolRegistry.register_tool(
     name="get_conversation_history",
-    description=(
-        "Fetch previous messages from the current conversation when needed. "
-        "Use this ONLY if the user refers to something earlier, asks about previous context, "
-        "continues an old topic, or if answering correctly requires knowing details from earlier in this specific conversation. "
-        "Do not use this for the immediate previous message (which you already have)."
-    ),
+    description="get_conversation_history(reason, max_tokens) -> returns previous messages if user refers to past context",
     parameters={
         "type": "object",
         "properties": {
@@ -57,7 +52,7 @@ def trim_history_fifo(messages: List[Any], max_tokens: int) -> List[Any]:
         },
         "required": ["reason"]
     },
-    metadata={"category": "system"}
+    metadata={"category": "system", "enabled": False}
 )
 async def get_conversation_history(
     reason: str,

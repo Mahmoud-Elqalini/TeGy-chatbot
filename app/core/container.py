@@ -98,7 +98,7 @@ class ServiceContainer:
             lock_port=lock_port,
             resilience=resilience_port,
             idempotency=IdempotencyService(redis),
-            profile_sync=UserProfileService(db),
+            profile_sync=UserProfileService(db, state_port),
             persistence=persistence,
             memory_service=memory_workflow,
             summarizer=summarizer,

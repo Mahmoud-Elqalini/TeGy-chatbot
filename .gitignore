@@ -7,37 +7,105 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
+*.pyd
 .venv/
 venv/
 env/
 *.egg-info/
+*.egg/
 dist/
 build/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
 create_token.py
 test_e2e.py
 check_db.py
 init_db.py
+test_orchestrator_metrics.py
 
+# ─── Cache Files ──────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+*.cache
+.tmp
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 *.db
 *.sqlite3
+*.sqlite
+*.sqlite-journal
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
+log/
 
 # ─── IDE ──────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.suo
 *.user
+*.swp
+*.swo
+*~
+.vscode/settings.json
+.vscode/launch.json
 
 # ─── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# ─── Tests ────────────────────────────────────────────────────────────────────
+# ─── Node.js / npm ────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log
+yarn-error.log
+.npm/
+.yarn/
+
+# ─── Build & Distribution ────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg/
+.tox/
+.eggs/
+
+# ─── Testing & Profiling ────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+*.cover
+profile_results.txt
+.benchmarks/
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.vscode
+.idea
+*.pem
+*.key
+*.crt
+*.cert
+.env.local
+.env.*.local
+

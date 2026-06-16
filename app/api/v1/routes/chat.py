@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, List, Dict
 import uuid
-from fastapi import APIRouter, Depends, Header, Request, Response, Query, status
+from fastapi import APIRouter, Depends, Header, Request, Response, Query, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.db_deps import get_chatbot_session, get_main_session
@@ -43,6 +43,7 @@ async def get_session_service(
 @router.post("/message", response_model=Union[ChatIntegrationResponse, ChatMessageResponse])
 async def send_chat_message(
     request: ChatMessageRequest,
+    background_tasks: BackgroundTasks,
     auth = Depends(get_auth_context),
     app_service: ChatApplicationService = Depends(get_chat_application_service),
     x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key"),
@@ -53,7 +54,8 @@ async def send_chat_message(
     return await app_service.execute(
         auth=auth,
         api_request=request,
-        idempotency_key=x_idempotency_key
+        idempotency_key=x_idempotency_key,
+        background_tasks=background_tasks
     )
 
 

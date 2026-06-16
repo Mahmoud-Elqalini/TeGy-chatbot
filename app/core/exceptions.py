@@ -84,6 +84,11 @@ class AITransientException(AIException):
         super().__init__(detail, "AI_TRANSIENT")
 
 
+class AIFatalException(AIException):
+    def __init__(self, detail: str = "AI service fatal error"):
+        super().__init__(detail, "AI_FATAL")
+
+
 class LLMUnavailableException(AIException):
     def __init__(self, detail: str = "LLM unreachable or exhausted retries"):
         super().__init__(detail, "LLM_UNAVAILABLE")

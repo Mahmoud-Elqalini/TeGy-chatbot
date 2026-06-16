@@ -182,4 +182,66 @@ class RedisClient:
         Execute Redis Lua script (used for atomic operations)
         """
         return await self._r.eval(script, numkeys, *args)
+
+    # --------- Cache Management & Cleanup ---------
+    async def get_database_info(self) -> dict:
+        """Returns detailed database information (size, memory usage)."""
+        info = await self._r.info()
+        return {
+            "used_memory": info.get("used_memory", 0),
+            "used_memory_human": info.get("used_memory_human", "N/A"),
+            "keys_total": await self._r.dbsize(),
+            "connected_clients": info.get("connected_clients", 0),
+            "evicted_keys": info.get("evicted_keys", 0),
+        }
+
+    async def get_key_patterns(self, pattern: str = "*") -> list[str]:
+        """Scans and returns all keys matching a pattern."""
+        keys = []
+        async for key in self._r.scan_iter(match=pattern):
+            keys.append(key)
+        return keys
+
+    async def clear_pattern(self, pattern: str) -> int:
+        """Deletes all keys matching a pattern. Returns count deleted."""
+        keys = await self.get_key_patterns(pattern)
+        if not keys:
+            return 0
+        
+        pipe = self._r.pipeline()
+        for key in keys:
+            pipe.delete(key)
+        results = await pipe.execute()
+        return sum(1 for r in results if r > 0)
+
+    async def clear_sessions(self) -> int:
+        """Clears all session-related keys (contexts, messages, locks)."""
+        session_pattern = f"{RedisKeys.PREFIX}:session:*"
+        return await self.clear_pattern(session_pattern)
+
+    async def clear_all_cache(self) -> int:
+        """Clears ALL data in the current Redis database. ⚠️ DESTRUCTIVE."""
+        count = await self._r.dbsize()
+        await self._r.flushdb()
+        return count
+
+    async def get_cache_stats(self) -> dict:
+        """Returns comprehensive cache statistics."""
+        db_info = await self.get_database_info()
+        session_keys = await self.get_key_patterns(f"{RedisKeys.PREFIX}:session:*")
+        
+        # Analyze key types
+        key_stats = {}
+        for key in session_keys:
+            key_type = key.split(":")[2] if len(key.split(":")) > 2 else "unknown"
+            key_stats[key_type] = key_stats.get(key_type, 0) + 1
+        
+        return {
+            "database": db_info,
+            "session_keys_total": len(session_keys),
+            "key_type_breakdown": key_stats,
+            "timestamp": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(),
+        }
         

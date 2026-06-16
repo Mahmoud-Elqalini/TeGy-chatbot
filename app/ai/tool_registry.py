@@ -122,6 +122,10 @@ class ToolRegistry:
         """
         definitions = []
         for tool in self._tools.values():
+            # Skip disabled tools so they aren't passed to the LLM Planner
+            if tool.metadata.get("enabled", True) is False:
+                continue
+
             # Deep copy to avoid mutating the original tool definition
             params = self._sanitize_schema(tool.parameters)
             definitions.append({

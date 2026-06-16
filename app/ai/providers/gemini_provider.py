@@ -148,7 +148,18 @@ class GeminiProvider(LLMProvider):
             chat_history.append({"role": "user", "parts": [results_block]})
 
         chat = model.start_chat(history=chat_history)
+        
+        start_network = time.perf_counter()
         response = chat.send_message(request.user_input)
+        network_time = round((time.perf_counter() - start_network) * 1000, 2)
+        
+        from app.core.trace_context import get_active_trace
+        trace = get_active_trace()
+        if trace:
+            from app.core.observability import trace_layer_ctx
+            layer = trace_layer_ctx.get()
+            if layer in trace.layers:
+                trace.layers[layer].network_ms += network_time
         
         # Extraction with safety
         content = ""

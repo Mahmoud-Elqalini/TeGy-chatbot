@@ -40,6 +40,7 @@ class ChatDomainResponse:
     ai_tokens: int
     tool_results: List[Dict[str, Any]] | None
     latency_ms: int
+    token_breakdown: Dict[str, int]
 
 
 @dataclass

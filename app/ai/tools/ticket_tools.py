@@ -6,7 +6,7 @@ from app.ai.tool_registry import ToolRegistry
 
 @ToolRegistry.register_tool(
     name="create_ticket",
-    description="Book a ticket for a specific event.",
+    description="create_ticket(event_id) -> returns booking confirmation",
     parameters={
         "type": "object",
         "properties": {

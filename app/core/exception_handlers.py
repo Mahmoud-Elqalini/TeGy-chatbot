@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.core.exceptions import AppException, RateLimitException
-from app.core.observability import get_request_id
+from app.core.observability import get_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             request.url.path,
             exc.status_code,
             exc.detail,
-            get_request_id(),
+            get_trace_id(),
         )
         headers = {}
         if isinstance(exc, RateLimitException):
@@ -32,7 +32,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "code": exc.error_code,
                     "message": exc.detail
                 },
-                "request_id": get_request_id()
+                "request_id": get_trace_id()
             },
         )
 
@@ -42,7 +42,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             "validation-error path=%s error=%s request_id=%s",
             request.url.path,
             exc.errors(),
-            get_request_id(),
+            get_trace_id(),
         )
         return JSONResponse(
             status_code=422,
@@ -52,7 +52,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "message": "The request payload is invalid.",
                     "details": exc.errors()
                 },
-                "request_id": get_request_id()
+                "request_id": get_trace_id()
             },
         )
 
@@ -64,7 +64,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             request.url.path,
             type(exc).__name__,
             exc,
-            get_request_id(),
+            get_trace_id(),
             exc_info=True,
         )
         return JSONResponse(
@@ -74,6 +74,6 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "code": "INTERNAL_SERVER_ERROR",
                     "message": "An unexpected error occurred."
                 },
-                "request_id": get_request_id()
+                "request_id": get_trace_id()
             },
         )

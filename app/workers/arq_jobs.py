@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 async def startup(ctx: dict):
     logger.info("Worker starting up... Initializing AI Providers.")
-    # Initialize the provider fallback chain (Gemini -> Groq -> OpenRouter)
+    # Initialize the provider fallback chain (Groq -> Fireworks -> Gemini)
     # automatically based on configuration and priority.
     from app.ai.providers.factory import ProviderFactory
     primary_provider = ProviderFactory.initialize_provider_chain()

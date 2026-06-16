@@ -82,7 +82,7 @@ class IntentDetector:
 
         # Check for Greeting Hints
         if tokens & self.GREETING_HINTS:
-            return "general", 0.95
+            return "greeting", 0.98
 
         # Default fallback
         return "general", 0.2
@@ -99,36 +99,40 @@ class IntentDetector:
             return {
                 "intent": rule_intent,
                 "confidence": rule_confidence,
-                "source": "rule"
+                "source": "rule",
+                "tokens": 0
             }
 
         # Fallback to LLM if needed (uncertain or general)
         if (rule_confidence < 0.6 or rule_intent == "general") and self.response_generator:
             logger.info("intent.detector.llm_fallback", rule_intent=rule_intent, rule_confidence=rule_confidence)
             try:
-                llm_intent = await self._llm_detect(content, history)
+                llm_intent, tokens = await self._llm_detect(content, history)
                 # LLM result is realistic but not perfect
                 return {
                     "intent": llm_intent,
                     "confidence": 0.85, 
-                    "source": "llm"
+                    "source": "llm",
+                    "tokens": tokens
                 }
             except Exception as exc:
                 logger.error("intent.detector.llm_failed", error=str(exc))
                 return {
                     "intent": rule_intent,
                     "confidence": rule_confidence,
-                    "source": "rule"
+                    "source": "rule",
+                    "tokens": 0
                 }
 
         # Medium confidence match
         return {
             "intent": rule_intent,
             "confidence": rule_confidence,
-            "source": "rule"
+            "source": "rule",
+            "tokens": 0
         }
 
-    async def _llm_detect(self, content: str, history: list[dict] | None = None) -> str:
+    async def _llm_detect(self, content: str, history: list[dict] | None = None) -> tuple[str, int]:
         """
         Deterministic LLM classification.
         """
@@ -138,6 +142,7 @@ class IntentDetector:
         - support_billing
         - support_technical
         - support_event
+        - greeting
         - general
 
         Message: "{content}"
@@ -147,17 +152,18 @@ class IntentDetector:
         
         try:
             response = await self.response_generator.generate_simple(prompt)
-            detected = response.strip().lower()
+            detected = response.content.strip().lower()
+            tokens_used = response.prompt_tokens + response.completion_tokens
             
-            valid_intents = {"booking", "support_billing", "support_technical", "support_event", "general"}
+            valid_intents = {"booking", "support_billing", "support_technical", "support_event", "greeting", "general"}
             if detected in valid_intents:
-                return detected
+                return detected, tokens_used
             
             # Map common LLM variations if any
-            if "ticket" in detected or "reserve" in detected: return "booking"
-            if "bill" in detected or "pay" in detected: return "support_billing"
+            if "ticket" in detected or "reserve" in detected: return "booking", tokens_used
+            if "bill" in detected or "pay" in detected: return "support_billing", tokens_used
             
-            return "general"
+            return "general", tokens_used
         except Exception:
             raise
 

@@ -41,10 +41,10 @@ class ResponseGenerator:
         """
         return await self.provider.count_tokens(content, model)
 
-    async def generate_simple(self, prompt: str) -> str:
+    async def generate_simple(self, prompt: str) -> LLMResponse:
         """
         A simplified version of 'generate' for quick, one-off questions.
-        Useful for internal tasks like classifying text.
+        Returns full LLMResponse for token tracking.
         """
         request = LLMRequest(
             model=None,
@@ -52,5 +52,4 @@ class ResponseGenerator:
             history=[],
             user_input=prompt
         )
-        response = await self.generate(request)
-        return response.content
+        return await self.generate(request)

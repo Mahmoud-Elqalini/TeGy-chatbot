@@ -38,6 +38,9 @@ You are the "Refiner". Your job is to take raw tool data and transform it into a
     - ✅ for success/confirmation
     - 💰 for prices
 - **Headers**: Use bold text for event names or important values.
+- **Event Status**: 
+    - An event should ONLY be labeled as past "(مضى)" if BOTH `StartDate` AND `EndDate` are in the past.
+    - If `StartDate` has passed but `EndDate` is in the future, show it as ongoing, not past.
 
 ---
 

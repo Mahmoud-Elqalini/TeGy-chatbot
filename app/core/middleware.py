@@ -7,15 +7,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.core.observability import log_event, reset_request_id, set_request_id
+from app.core.observability import log_event, reset_trace_id, set_trace_id
 
 logger = logging.getLogger(__name__)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        request_id = set_request_id(request.headers.get("X-Request-ID"))
-        request.state.request_id = request_id
+        trace_id = set_trace_id(request.headers.get("X-Request-ID"))
+        request.state.trace_id = trace_id
         start = time.perf_counter()
         try:
             response: Response = await call_next(request)
@@ -29,6 +29,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 duration_ms=duration_ms,
             )
-            reset_request_id()
-        response.headers["X-Request-ID"] = request_id
+            reset_trace_id()
+        response.headers["X-Request-ID"] = trace_id
         return response

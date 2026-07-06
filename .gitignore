@@ -1,4 +1,4 @@
-# ─── Secrets ──────────────────────────────────────────────────────────────────
+# ─── Secrets & Config ─────────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
@@ -7,30 +7,33 @@
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyc
 *.pyd
 .venv/
+.venv_wsl/
 venv/
 env/
+ENV/
 *.egg-info/
 *.egg/
+.eggs/
 dist/
 build/
 .mypy_cache/
 .dmypy.json
 dmypy.json
 .pyre/
-create_token.py
-test_e2e.py
-check_db.py
-init_db.py
-test_orchestrator_metrics.py
 
-# ─── Cache Files ──────────────────────────────────────────────────────────────
+# ─── Testing & Profiling ──────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
+*.cover
+.tox/
+profile_results.txt
+.benchmarks/
+
+# ─── Cache & Temporary Files ──────────────────────────────────────────────────
 .cache/
 *.cache
 .tmp
@@ -39,9 +42,7 @@ htmlcov/
 *.swp
 *.swo
 *~
-.DS_Store
-.AppleDouble
-.LSOverride
+scratch/
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 *.db
@@ -54,19 +55,20 @@ htmlcov/
 logs/
 log/
 
-# ─── IDE ──────────────────────────────────────────────────────────────────────
+# ─── IDE & Tools ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.suo
 *.user
-*.swp
-*.swo
-*~
-.vscode/settings.json
-.vscode/launch.json
+*.pem
+*.key
+*.crt
+*.cert
 
 # ─── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
+.AppleDouble
+.LSOverride
 Thumbs.db
 desktop.ini
 
@@ -76,36 +78,3 @@ npm-debug.log
 yarn-error.log
 .npm/
 .yarn/
-
-# ─── Build & Distribution ────────────────────────────────────────────────────
-dist/
-build/
-*.egg-info/
-*.egg/
-.tox/
-.eggs/
-
-# ─── Testing & Profiling ────────────────────────────────────────────────────
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-*.cover
-profile_results.txt
-.benchmarks/
-
-# ─── Misc ────────────────────────────────────────────────────────────────────
-.venv/
-venv/
-env/
-ENV/
-.vscode
-.idea
-*.pem
-*.key
-*.crt
-*.cert
-.env.local
-.env.*.local
-

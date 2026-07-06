@@ -47,13 +47,19 @@ async def lifespan(app: FastAPI):
     discover_and_register()
     
     # 3. Initialize cache manager for centralized cache operations
-    redis_client = await get_redis()
-    cache_manager = CacheManager(redis_client)
+    try:
+        redis_client = await get_redis()
+        cache_manager = CacheManager(redis_client)
+    except Exception as e:
+        logger.warning(f"⚠️ Redis unavailable, running without cache: {e}")
+        redis_client = None
+        cache_manager = CacheManager(None)
     
     # 4. Warm the cache (loads all .md/.txt files from app/ai/prompts/ and validates Redis)
     try:
         cache_manager.warm_prompt_cache()
-        await cache_manager.warm_redis_cache()
+        if redis_client:
+            await cache_manager.warm_redis_cache()
         logger.info("✅ Cache warming completed successfully")
     except Exception as e:
         logger.warning(f"⚠️ Cache warming encountered issues: {e}")
@@ -66,7 +72,14 @@ async def lifespan(app: FastAPI):
     app.state.ai_provider = primary_provider
     app.state.response_generator = response_generator
     app.state.tool_registry = tool_registry
-    app.state.arq_pool = await create_pool(get_arq_redis_settings())
+    
+    # ARQ pool (graceful degradation if Redis unavailable)
+    try:
+        app.state.arq_pool = await create_pool(get_arq_redis_settings())
+    except Exception as e:
+        logger.warning(f"⚠️ ARQ pool unavailable (background jobs disabled): {e}")
+        app.state.arq_pool = None
+    
     app.state.cache_manager = cache_manager
     
     logger.info("✅ Application startup completed")

@@ -8,6 +8,7 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import RequestContextMiddleware
 from app.core.observability import configure_logging
 from app.db.redis import close_redis, get_redis
+from app.core.background_task_utils import drain_background_tasks
 from app.api.v1.routes import chat, health, sessions
 
 # Import core AI and service components
@@ -82,6 +83,10 @@ async def lifespan(app: FastAPI):
     
     app.state.cache_manager = cache_manager
     
+    # 7. Initialize Semantic Cache
+    from app.services.semantic_cache_service import SemanticCacheService
+    app.state.semantic_cache = SemanticCacheService()
+    
     logger.info("✅ Application startup completed")
     
     yield
@@ -118,7 +123,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to log provider metrics: {e}")
     
-    # 4. Close ARQ pool
+    # 4. Drain remaining fire-and-forget background tasks
+    try:
+        await drain_background_tasks()
+    except Exception as e:
+        logger.error(f"Error draining background tasks: {e}")
+
+    # 5. Close ARQ pool
     if hasattr(app.state, "arq_pool"):
         try:
             await app.state.arq_pool.close()
@@ -126,7 +137,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Error closing ARQ pool: {e}")
     
-    # 5. Close Redis connection (final cleanup)
+    # 6. Close Redis connection (final cleanup)
     try:
         await close_redis()
         logger.info("✅ Redis connection closed")

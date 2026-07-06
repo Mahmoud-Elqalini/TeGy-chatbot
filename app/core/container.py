@@ -26,7 +26,7 @@ from app.repositories.message_repo import MessageRepository
 from app.repositories.session_repo import SessionRepository
 from app.repositories.summary_repo import SummaryRepository
 from app.repositories.model_settings_repo import ModelSettingsRepository
-from app.services.ai_orchestrator import AIOrchestrator
+from app.services.ai_orchestrator import AIOrchestrator, OrchestratorRuntimeDeps
 from app.services.chat_application_service import ChatApplicationService
 from app.services.chat_memory_service import ChatMemoryService
 from app.services.chat_persistence_service import ChatPersistenceService
@@ -49,7 +49,8 @@ class ServiceContainer:
     async def build_session_service(db: AsyncSession) -> SessionService:
         """Standalone SessionService for session/history endpoints."""
         redis = await get_redis()
-        return ServiceContainer._build_session_service(db, redis)
+        message_repo = MessageRepository(db)
+        return ServiceContainer._build_session_service(db, message_repo, redis)
 
     @staticmethod
     async def build_chat_application_service(
@@ -58,10 +59,16 @@ class ServiceContainer:
         main_db: AsyncSession,
     ) -> ChatApplicationService:
         """Fully-wired ChatApplicationService for the chat pipeline."""
+        # [DESIGN DECISION]: Fail-fast if Redis is down. 
+        # Since Redis is critical for state, locks, and idempotency, we deliberately
+        # fail the container build rather than falling back.
         redis = await get_redis()  # Single resolution for entire graph
 
+        # ── Single Construction Point for Repositories ──
+        message_repo = MessageRepository(db)
+
         # ── Shared service (single source of truth) ──
-        session_service = ServiceContainer._build_session_service(db, redis)
+        session_service = ServiceContainer._build_session_service(db, message_repo, redis)
 
         # ── Infrastructure adapters (all share same redis instance) ──
         state_port = RedisStateAdapter(redis)
@@ -72,23 +79,25 @@ class ServiceContainer:
         )
 
         # ── Application workflow services ──
-        message_service = MessageService(MessageRepository(db))
+        message_service = MessageService(message_repo)
         persistence = ChatPersistenceService(message_service, session_service)
         memory_workflow = ChatMemoryService(state_port, message_service, request.app.state.arq_pool)
         summarizer = Summarizer(request.app.state.response_generator)
 
-        # ── Domain layer ──
+        # db: The Chatbot's internal state DB (sessions, messages, memory).
+        # main_db: The primary application DB (events, bookings) passed to tools.
         ai_orchestrator = AIOrchestrator(
             request.app.state.response_generator,
             ResponseValidator(),
             request.app.state.tool_registry,
-            runtime_deps={"main_db": main_db, "db": db}
+            runtime_deps=OrchestratorRuntimeDeps(main_db=main_db, db=db)
         )
         chat_domain = ChatService(
             ai_orchestrator=ai_orchestrator,
             intent_detector=IntentDetector(request.app.state.response_generator),
             intent_router=IntentRouter(),
             prompt_builder=PromptBuilder(),
+            semantic_cache=request.app.state.semantic_cache,
         )
 
         # ── Orchestrator assembly ──
@@ -97,6 +106,9 @@ class ServiceContainer:
             token_port=token_port,
             lock_port=lock_port,
             resilience=resilience_port,
+            # [DESIGN DECISION]: IdempotencyService takes the raw redis client directly 
+            # because its logic is highly Redis-native (TTL, SETNX, binary blobs)
+            # and abstracting it behind a port would be an unnecessary leaky abstraction.
             idempotency=IdempotencyService(redis),
             profile_sync=UserProfileService(db, state_port),
             persistence=persistence,
@@ -107,11 +119,12 @@ class ServiceContainer:
     # ── Private Helpers (single construction point per service) ────────
 
     @staticmethod
-    def _build_session_service(db: AsyncSession, redis: RedisClient) -> SessionService:
+    def _build_session_service(db: AsyncSession, message_repo: MessageRepository, redis: RedisClient) -> SessionService:
         """Single construction point for SessionService — used by all builders."""
         return SessionService(
             session_repo=SessionRepository(db),
-            message_repo=MessageRepository(db),
+            message_repo=message_repo,
+            # [DESIGN DECISION]: MemoryManager uses raw redis client for native operations
             memory=MemoryManager(redis),
             summary_repo=SummaryRepository(db),
             memory_repo=MemoryRepository(db),

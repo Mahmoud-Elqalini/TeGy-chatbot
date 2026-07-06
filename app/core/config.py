@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # External Services
     SEMANTIC_SEARCH_API_URL: str = "http://138.197.63.199:8000/search"
 
+    # Semantic Cache Settings
+    SEMANTIC_CACHE_THRESHOLD: float = 0.88
+    SEMANTIC_CACHE_TTL_DAYS: int = 7
+
     DATABASE_URL: Optional[str] = None
     MAIN_DATABASE_URL: Optional[str] = None
     CHATBOT_DATABASE_URL: Optional[str] = None

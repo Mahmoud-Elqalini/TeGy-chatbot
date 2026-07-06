@@ -13,8 +13,19 @@ from app.ai.response_generator import ResponseGenerator
 from app.ai.safety import ResponseValidator
 from app.ai.template_engine import TemplateEngine
 from app.ai.tool_registry import ToolRegistry
-from app.core.observability import get_logger, set_trace_id, set_trace_layer, reset_trace_layer
+from app.core.observability import get_logger, set_trace_id, set_trace_layer, reset_trace_layer, trace_layer_ctx
 from app.core.trace_context import RequestTrace, set_active_trace, reset_active_trace, get_active_trace
+from dataclasses import dataclass
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@dataclass
+class OrchestratorRuntimeDeps:
+    db: AsyncSession
+    main_db: AsyncSession
+
+    def to_dict(self) -> dict:
+        return {"db": self.db, "main_db": self.main_db}
+
 
 logger = get_logger(__name__)
 
@@ -35,14 +46,14 @@ class AIOrchestrator:
         response_generator: ResponseGenerator,
         response_validator: ResponseValidator,
         tool_registry: Optional[ToolRegistry] = None,
-        runtime_deps: Optional[Dict[str, Any]] = None,
+        runtime_deps: Optional[OrchestratorRuntimeDeps] = None,
         fast_path_router: Optional[FastPathRouter] = None,
         template_engine: Optional[TemplateEngine] = None,
     ):
         self.response_generator = response_generator
         self.response_validator = response_validator
         self.tool_registry = tool_registry
-        self.runtime_deps = runtime_deps or {}
+        self.runtime_deps = runtime_deps
         # Optimisation layers — defaulted so existing callers need no changes
         self.fast_path_router: FastPathRouter = fast_path_router or FastPathRouter()
         self.template_engine: TemplateEngine = template_engine or TemplateEngine()
@@ -118,7 +129,7 @@ class AIOrchestrator:
             return []
 
         results = []
-        tool_deps = dict(self.runtime_deps)
+        tool_deps = self.runtime_deps.to_dict() if self.runtime_deps else {}
         if session_id:
             tool_deps["session_id"] = session_id
         if user_id:
@@ -139,7 +150,6 @@ class AIOrchestrator:
                 
                 trace = get_active_trace()
                 if trace:
-                    from app.core.observability import trace_layer_ctx
                     layer = trace_layer_ctx.get()
                     if layer in trace.layers:
                         trace.layers[layer].tool_ms += tool_time
@@ -228,7 +238,12 @@ class AIOrchestrator:
         return await self._execute_llm_path(user_input, intent, payload, session_id)
 
     def _sanitize_tool_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Semantic Firewall: Sanitizes tool outputs to prevent indirect prompt injection."""
+        """
+        Semantic Firewall (Layer 2): Sanitizes structured tool outputs.
+        Note: Layer 1 happens in handle_tool_calls where it checks for '[REDACTED' strings.
+        This Layer 2 filters dict keys to prevent indirect prompt injection, 
+        using exact matching to avoid blocking safe keys like 'duration' or 'door_number'.
+        """
         forbidden_keys = {"instruction", "command", "task", "execute", "run", "do"}
         sanitized = []
         
@@ -238,7 +253,7 @@ class AIOrchestrator:
             raw_data = result.get("output", {})
             if isinstance(raw_data, dict):
                 for k, v in raw_data.items():
-                    if any(f in k.lower() for f in forbidden_keys):
+                    if k.lower() in forbidden_keys:
                         continue
                     if isinstance(v, str) and (v.strip().startswith("SYSTEM:") or v.strip().startswith("USER:")):
                         v = "[REDACTED: POTENTIAL INJECTION]"

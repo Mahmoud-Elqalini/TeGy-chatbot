@@ -19,6 +19,7 @@ ENV/
 dist/
 build/
 .mypy_cache/
+.ruff_cache/
 .dmypy.json
 dmypy.json
 .pyre/
@@ -27,6 +28,7 @@ dmypy.json
 .pytest_cache/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 *.cover
 .tox/

@@ -80,3 +80,9 @@ npm-debug.log
 yarn-error.log
 .npm/
 .yarn/
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z

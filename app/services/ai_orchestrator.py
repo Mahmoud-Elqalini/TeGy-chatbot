@@ -73,7 +73,26 @@ class AIOrchestrator:
             request.tools = None
             request.tool_choice = "none"
         elif self.tool_registry:
-            request.tools = self.tool_registry.get_tool_definitions()
+            all_tools = self.tool_registry.get_tool_definitions()
+            intent = request.metadata.get("intent") if request.metadata else None
+            
+            # Dynamic Tool Injection based on intent
+            if intent in ["booking", "create_booking"]:
+                allowed = {"check_availability", "create_booking", "get_user_profile"}
+            elif intent in ["discover", "support_event", "get_event_details", "search_events"]:
+                allowed = {"search_events", "get_event_details", "get_user_profile"}
+            elif intent in ["manage_booking", "get_booking", "cancel_booking", "get_user_bookings"]:
+                allowed = {"get_booking", "cancel_booking", "get_user_bookings", "get_user_profile"}
+            elif intent in ["greeting", "general_faq", "chit_chat", "fallback"]:
+                allowed = {"get_user_profile"}
+            else:
+                allowed = None  # Allow all if unknown intent
+                
+            if allowed is not None:
+                request.tools = [t for t in all_tools if t["name"] in allowed]
+            else:
+                request.tools = all_tools
+                
         return request
 
     async def generate_response(

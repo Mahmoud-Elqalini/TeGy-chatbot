@@ -19,11 +19,7 @@ class PromptBuilder:
         elif intent == "discover":
             parts.append(PromptLoader.load("phase_discovery"))
             
-        parts.append(
-            "--- SYSTEM ARCHITECTURE CONSTRAINTS ---\n"
-            "The main booking platform remains the source of truth for transactional and financial operations. "
-            "Use the chatbot database only as context and projection data."
-        )
+
         if context.current_summary:
             parts.append(f"Conversation summary:\n{context.current_summary}")
         if context.current_intent:
@@ -43,5 +39,5 @@ class PromptBuilder:
             parts.append(f"Conversation summary:\n{context.current_summary}")
         return "\n\n".join(parts)
 
-    def build_history(self, messages: list[dict[str, Any]], max_messages: int = 12) -> list[dict[str, Any]]:
+    def build_history(self, messages: list[dict[str, Any]], max_messages: int = 4) -> list[dict[str, Any]]:
         return messages[-max_messages:]

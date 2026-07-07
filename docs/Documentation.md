@@ -17,7 +17,7 @@ The primary objectives of this project are:
 1. **Event Discovery**: Enable users to find events matching their interests through natural language queries, powered by semantic search and database retrieval (`app/ai/tools/event_tools.py`).
 2. **Intelligent Q&A**: Answer user questions about event dates, ticket prices, venues, and booking status using LLM-generated responses grounded in real database records.
 3. **Booking Management**: Guide users step-by-step through ticket booking and allow retrieval or cancellation of existing bookings (`app/ai/tools/ticket_tools.py`, `app/ai/tools/order_tools.py`).
-4. **Multi-Language Support**: Handle conversations in both Arabic and English, with Arabic-first branded responses for social interactions (`app/ai/fast_path_router.py`, lines 171–176).
+4. **Multi-Language Support**: Handle conversations in both Arabic and English, with Arabic-first branded responses for social interactions (`app/ai/fast_path_router.py`).
 5. **Production-Grade Reliability**: Ensure continuous availability through multi-provider LLM failover, distributed locking, idempotency guarantees, and graceful degradation when external services are unavailable.
 
 ## 3. System Overview
@@ -41,10 +41,10 @@ The following table presents the key features of TeGy-Chatbot from a business pe
 | Feature | Business Benefit | Evidence |
 |---|---|---|
 | 24/7 Automated Customer Support | Reduces the need for human support agents by handling common queries (event info, booking status) autonomously. | `app/ai/intent_detector.py`: classifies intents including `support_billing`, `support_technical`, `support_event` |
-| Multi-Provider LLM Failover | Ensures chatbot availability even when a single AI provider experiences downtime or rate limiting. | `app/ai/providers/factory.py` (line 18): `PRIORITY_LIST = ["groq", "fireworks", "gemini"]` |
-| Zero-LLM Fast Path for Social Intents | Reduces AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (saving ~1,400 tokens per interaction). | `app/ai/fast_path_router.py` (lines 183–184): `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
-| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, reducing latency and API costs. | `app/services/semantic_cache_service.py`: FAISS-based vector search with configurable similarity threshold (0.88) |
-| Automated Conversation Summarization | Reduces token consumption for long conversations by summarizing older messages in the background. | `app/workers/summarization_worker.py`, triggered every 10 messages (`app/ai/memory_manager.py`, line 27) |
+| Multi-Provider LLM Failover | Ensures chatbot availability even when a single AI provider experiences downtime or rate limiting. | `app/ai/providers/factory.py`: `PRIORITY_LIST = ["groq", "fireworks", "gemini"]` |
+| Zero-LLM Fast Path for Social Intents | Reduces AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (saving ~1,400 tokens per interaction). | `app/ai/fast_path_router.py`: `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
+| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, reducing latency and API costs. | `app/services/semantic_cache_service.py`: Implemented in pp/services/semantic_cache_service.py |
+| Automated Conversation Summarization | Reduces token consumption for long conversations by summarizing older messages in the background. | `app/workers/summarization_worker.py`, triggered every 10 messages (`app/ai/memory_manager.py`) |
 | Guided Booking via Tool Calling | Reduces booking abandonment and human error by allowing the AI to execute database operations (search events, create tickets) on behalf of the user. | `app/ai/tools/event_tools.py`, `app/ai/tools/ticket_tools.py` |
 | Idempotency and Distributed Locking | Prevents duplicate bookings and ensures data consistency under concurrent requests. | `app/services/idempotency_service.py`, `app/infrastructure/adapters/redis_lock_adapter.py` |
 
@@ -127,7 +127,7 @@ graph TD
 
 ## 6. Message Flow and Request Lifecycle
 
-When a user sends a message via `POST /api/v1/chat/message`, the request traverses a multi-phase pipeline within `ChatApplicationService.execute()` (`app/services/chat_application_service.py`, lines 71–303). The following sequence diagram traces the complete lifecycle.
+When a user sends a message via `POST /api/v1/chat/message`, the request traverses a multi-phase pipeline within `ChatApplicationService.execute()` (`app/services/chat_application_service.py`). The following sequence diagram traces the complete lifecycle.
 
 ```mermaid
 sequenceDiagram
@@ -204,17 +204,17 @@ sequenceDiagram
 
 The pipeline within `ChatApplicationService.execute()` operates in three sequential phases:
 
-**Phase 1 — Context Resolution** (lines 179–191): The system resolves the user identity from the JWT token, synchronizes the user profile, creates or retrieves the chat session, and loads conversation history from Redis.
+**Phase 1 — Context Resolution**: The system resolves the user identity from the JWT token, synchronizes the user profile, creates or retrieves the chat session, and loads conversation history from Redis.
 
-**Phase 2 — AI Generation** (lines 195–218): The `ChatService.generate_response()` method is invoked with a configurable timeout (`AI_REQUEST_TIMEOUT = 45` seconds, from `app/core/config.py` line 88). This phase encompasses intent detection, routing, semantic cache lookup, and the three-engine orchestrator pipeline (Planner → Execution → Renderer).
+**Phase 2 — AI Generation**: The `ChatService.generate_response()` method is invoked with a configurable timeout (`AI_REQUEST_TIMEOUT = 45` seconds, from `app/core/config.py`). This phase encompasses intent detection, routing, semantic cache lookup, and the three-engine orchestrator pipeline (Planner → Execution → Renderer).
 
-**Phase 3 — Persistence** (lines 227–292): User and assistant messages are persisted to PostgreSQL and Redis memory. On the success path, persistence is executed in a background task to minimize response latency, with the distributed lock transferred to the background task to guarantee strict message ordering.
+**Phase 3 — Persistence**: User and assistant messages are persisted to PostgreSQL and Redis memory. On the success path, persistence is executed in a background task to minimize response latency, with the distributed lock transferred to the background task to guarantee strict message ordering.
 
 ## 7. AI and LLM Integration
 
 ### 7.1 Provider Architecture
 
-The system integrates three LLM providers, each implemented as a subclass of the abstract `LLMProvider` base class (`app/ai/providers/base.py`, lines 32–45). Providers are automatically discovered at startup via the `ProviderRegistry` (`app/ai/providers/registry.py`) and instantiated by the `ProviderFactory` (`app/ai/providers/factory.py`).
+The system integrates three LLM providers, each implemented as a subclass of the abstract `LLMProvider` base class (`app/ai/providers/base.py`). Providers are automatically discovered at startup via the `ProviderRegistry` (`app/ai/providers/registry.py`) and instantiated by the `ProviderFactory` (`app/ai/providers/factory.py`).
 
 | Provider | Model | Role | Fallback Order | Timeout | Source File |
 |---|---|---|---|---|---|
@@ -222,10 +222,10 @@ The system integrates three LLM providers, each implemented as a subclass of the
 | Fireworks | `qwen-v2p5-14b-instruct` | Secondary fallback | 2nd | 30s | `app/ai/providers/fireworks_provider.py` |
 | Gemini | `gemini-3-flash-preview` | Tertiary fallback | 3rd | 30s | `app/ai/providers/gemini_provider.py` |
 
-The fallback order is defined in `app/ai/providers/factory.py` (line 18):
+The fallback order is defined in `app/ai/providers/factory.py`:
 
 ```python
-# app/ai/providers/factory.py (line 18)
+# app/ai/providers/factory.py
 PRIORITY_LIST = ["groq", "fireworks", "gemini"]
 ```
 
@@ -246,10 +246,10 @@ graph LR
     P3 -->|"All Exhausted"| Error["LLMUnavailableException"]
 ```
 
-The following snippet shows the core fallback iteration from `app/ai/providers/fallback_provider.py` (lines 46–65):
+The following snippet shows the core fallback iteration from `app/ai/providers/fallback_provider.py`:
 
 ```python
-# app/ai/providers/fallback_provider.py (lines 46-65)
+# app/ai/providers/fallback_provider.py
 ranked_providers = sorted(
     self.providers,
     key=lambda p: (
@@ -273,15 +273,15 @@ for provider in ranked_providers:
 
 Network instability and API rate limits are common challenges when integrating third-party AI models. To protect the application from cascading failures and excessive latency, each provider is equipped with an independent circuit breaker and retry mechanism, both implemented in `app/ai/providers/resilience.py`.
 
-- **Circuit Breaker** (`ProviderCircuitBreaker`, lines 20–76): Transitions through three states — CLOSED → OPEN (after 5 consecutive failures) → HALF_OPEN (after 30-second cooldown) → CLOSED (on first success). These thresholds are configurable via `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_COOLDOWN_SECONDS` in `app/core/config.py` (lines 60–61).
-- **Retry with Exponential Backoff** (`retry_with_backoff`, lines 154–182): Retries transient and timeout errors up to `LLM_MAX_RETRIES = 2` times with a base delay of 0.5 seconds (from `app/core/config.py`, lines 58–59).
+- **Circuit Breaker** (`ProviderCircuitBreaker`): Transitions through three states — CLOSED → OPEN (after 5 consecutive failures) → HALF_OPEN (after 30-second cooldown) → CLOSED (on first success). These thresholds are configurable via `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_COOLDOWN_SECONDS` in `app/core/config.py`.
+- **Retry with Exponential Backoff** (`retry_with_backoff`): Retries transient and timeout errors up to `LLM_MAX_RETRIES = 2` times with a base delay of 0.5 seconds (from `app/core/config.py`).
 
 ### 7.4 Intent Detection and Routing
 
 Accurately understanding the user's goal is the first critical step in a conversational pipeline. Rather than routing all messages to an expensive LLM immediately, the intent detection system follows a hybrid approach implemented in `IntentDetector` (`app/ai/intent_detector.py`):
 
-1. **Rule-Based Detection** (lines 53–88): A fast, zero-cost first pass using keyword matching against predefined categories (`billing`, `technical`, `event`, `booking`, `greeting`). Each match yields a confidence score between 0.0 and 1.0.
-2. **LLM Fallback** (lines 90–133): When rule-based confidence falls below 0.6 or the intent is classified as `general`, the system falls back to the LLM for classification, costing tokens but providing higher accuracy.
+1. **Rule-Based Detection**: A fast, zero-cost first pass using keyword matching against predefined categories (`billing`, `technical`, `event`, `booking`, `greeting`). Each match yields a confidence score between 0.0 and 1.0.
+2. **LLM Fallback**: When rule-based confidence falls below 0.6 or the intent is classified as `general`, the system falls back to the LLM for classification, costing tokens but providing higher accuracy.
 
 The `IntentRouter` (`app/ai/intent_router.py`) translates the classified intent into a routing decision:
 - **`fast_path`**: For `greeting` and `booking` intents with high confidence (≥0.8). Greeting goes directly to `FastPathRouter`; booking falls through to the full LLM pipeline.
@@ -292,17 +292,17 @@ The `IntentRouter` (`app/ai/intent_router.py`) translates the classified intent 
 
 Handling complex multi-step tasks, such as searching for events and executing bookings, requires a structured reasoning and execution approach. To manage this safely and reliably, the `AIOrchestrator` (`app/services/ai_orchestrator.py`) implements a three-step pipeline for complex requests:
 
-1. **Planner Engine** (lines 292–321): Sends the user message to the LLM with available tools attached. The LLM decides whether to call tools or respond directly. If a tool hint is mapped to the intent (via `INTENT_TOOL_MAP`, lines 32–39) and the LLM fails to call it, the planner retries with forced tool choice up to 2 times.
-2. **Execution Engine** (lines 285–290): Executes the tool calls returned by the planner via `ToolRegistry.call_tool()`, passing runtime database sessions as dependencies. Tool outputs are sanitized through a two-layer semantic firewall (lines 259–283) that strips forbidden keys (`instruction`, `command`, `execute`, etc.) and detects prompt injection patterns.
-3. **Renderer Engine** (lines 323–335): A "blind renderer" that receives only the tool results and conversation context—never the raw tool definitions—to synthesize a user-facing response. This separation prevents the renderer from hallucinating tool calls.
+1. **Planner Engine**: Sends the user message to the LLM with available tools attached. The LLM decides whether to call tools or respond directly. If a tool hint is mapped to the intent (via `INTENT_TOOL_MAP`) and the LLM fails to call it, the planner retries with forced tool choice up to 2 times.
+2. **Execution Engine**: Executes the tool calls returned by the planner via `ToolRegistry.call_tool()`, passing runtime database sessions as dependencies. Tool outputs are sanitized through a two-layer semantic firewall that strips forbidden keys (`instruction`, `command`, `execute`, etc.) and detects prompt injection patterns.
+3. **Renderer Engine**: A "blind renderer" that receives only the tool results and conversation context—never the raw tool definitions—to synthesize a user-facing response. This separation prevents the renderer from hallucinating tool calls.
 
 ### 7.6 Fast Path Router
 
-To minimize unnecessary LLM usage and guarantee instant responses for common interactions, the system introduces a lightweight routing layer. The `FastPathRouter` (`app/ai/fast_path_router.py`) intercepts social/meta intents (greeting, identity, thanks, goodbye) using compiled regex patterns (lines 49–165) and returns predefined branded responses in Arabic without any LLM calls. This optimization saves approximately 1,400 tokens per matched interaction.
+To minimize unnecessary LLM usage and guarantee instant responses for common interactions, the system introduces a lightweight routing layer. The `FastPathRouter` (`app/ai/fast_path_router.py`) intercepts social/meta intents (greeting, identity, thanks, goodbye) using compiled regex patterns and returns predefined branded responses in Arabic without any LLM calls. This optimization saves approximately 1,400 tokens per matched interaction.
 
 ### 7.7 Tool Calling
 
-The AI can invoke database-connected functions via the `ToolRegistry` (`app/ai/tool_registry.py`). Tools are auto-discovered at startup by scanning `app/ai/tools/` for modules with `@ToolRegistry.register_tool` decorators (`app/ai/tools/__init__.py`, lines 13–59). The system currently registers three tools:
+The AI can invoke database-connected functions via the `ToolRegistry` (`app/ai/tool_registry.py`). Tools are auto-discovered at startup by scanning `app/ai/tools/` for modules with `@ToolRegistry.register_tool` decorators (`app/ai/tools/__init__.py`). The system currently registers three tools:
 
 | Tool Name | File | Purpose |
 |---|---|---|
@@ -310,11 +310,11 @@ The AI can invoke database-connected functions via the `ToolRegistry` (`app/ai/t
 | `create_ticket` | `app/ai/tools/ticket_tools.py` | Creates a ticket booking for a given event |
 | `search_orders` | `app/ai/tools/order_tools.py` | Retrieves past user orders |
 
-The orchestrator dynamically filters which tools are available based on the detected intent (`app/services/ai_orchestrator.py`, lines 69–96). For example, booking intents only receive `check_availability`, `create_booking`, and `get_user_profile` tools.
+The orchestrator dynamically filters which tools are available based on the detected intent (`app/services/ai_orchestrator.py`). For example, booking intents only receive `check_availability`, `create_booking`, and `get_user_profile` tools.
 
 ### 7.8 Semantic Cache
 
-To further reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py` (line 24). The cache has a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, lines 28–29, and `app/services/semantic_cache_service.py`, line 26).
+To further reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py`. The cache has a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, and `app/services/semantic_cache_service.py`).
 
 ## 8. Database Design
 
@@ -423,7 +423,7 @@ This separation of concerns ensures that the database structure remains optimal 
 
 ### 8.3 Redis Data Schema
 
-Redis keys follow a versioned naming convention managed by the `RedisKeys` class (`app/db/redis.py`, lines 68–90):
+Redis keys follow a versioned naming convention managed by the `RedisKeys` class (`app/db/redis.py`):
 
 | Key Pattern | Data Type | TTL | Purpose |
 |---|---|---|---|
@@ -432,7 +432,7 @@ Redis keys follow a versioned naming convention managed by the `RedisKeys` class
 | `v1:session:{id}:msg_count` | String (counter) | 24 hours | Message counter for summarization trigger |
 | `v1:session:{id}:summarizing` | String (lock) | 5 minutes | Distributed lock for summarization |
 
-These TTL values are defined in `app/ai/memory_manager.py` (lines 16–23).
+These TTL values are defined in `app/ai/memory_manager.py`.
 
 ## 9. Design Patterns
 
@@ -449,10 +449,10 @@ The following design patterns were identified and verified in the codebase:
 | **Adapter Pattern** | `app/infrastructure/adapters/redis_lock_adapter.py`, `redis_state_adapter.py`, `redis_resilience_adapter.py`, `ai_token_adapter.py` | Bridges infrastructure concerns (Redis, token counting) to abstract ports defined in `app/core/ports/`, isolating the service layer from infrastructure details. |
 | **Template Method** | `app/services/ai_orchestrator.py` (`_execute_llm_path` calling `_plan_step` → `_execute_step` → `_render_step`) | Defines a fixed algorithm skeleton (Plan → Execute → Render) with overridable steps. |
 
-The following snippet illustrates the Dependency Injection pattern in `app/core/container.py` (lines 55–117):
+The following snippet illustrates the Dependency Injection pattern in `app/core/container.py`:
 
 ```python
-# app/core/container.py (lines 55-70)
+# app/core/container.py
 @staticmethod
 async def build_chat_application_service(
     request: Request, db: AsyncSession, main_db: AsyncSession,
@@ -471,10 +471,10 @@ async def build_chat_application_service(
 
 ## 10. Background Job Processing
 
-The system uses **ARQ** (`arq==0.26.3`), a Redis-based asynchronous task queue, for background job processing. The worker configuration is defined in `app/workers/arq_jobs.py` (lines 71–78):
+The system uses **ARQ** (`arq==0.26.3`), a Redis-based asynchronous task queue, for background job processing. The worker configuration is defined in `app/workers/arq_jobs.py`:
 
 ```python
-# app/workers/arq_jobs.py (lines 71-78)
+# app/workers/arq_jobs.py
 class WorkerSettings:
     redis_settings = get_arq_redis_settings()
     functions = [summarize_session_job]
@@ -485,7 +485,7 @@ class WorkerSettings:
     on_shutdown = shutdown
 ```
 
-The primary background job is `summarize_session_job` (`app/workers/arq_jobs.py`, lines 58–68), which delegates to `run_summarization_job` (`app/workers/summarization_worker.py`, lines 18–93). This job is triggered when the message counter for a session reaches a multiple of 10 (`SUMMARIZE_EVERY = 10`, from `app/ai/memory_manager.py`, line 27). The summarization worker:
+The primary background job is `summarize_session_job` (`app/workers/arq_jobs.py`), which delegates to `run_summarization_job` (`app/workers/summarization_worker.py`). This job is triggered when the message counter for a session reaches a multiple of 10 (`SUMMARIZE_EVERY = 10`, from `app/ai/memory_manager.py`). The summarization worker:
 
 1. Acquires a distributed lock to prevent duplicate summarization.
 2. Performs a Redis bucket-lock re-verification and a database-level idempotency guard.
@@ -494,30 +494,30 @@ The primary background job is `summarize_session_job` (`app/workers/arq_jobs.py`
 5. Persists the summary to the `conv_summaries` table with a version number.
 6. Atomically decrements the message counter to preserve counts for messages that arrived during processing.
 
-Failed jobs are retried with exponential backoff up to `ARQ_MAX_RETRIES = 3` times (`app/core/config.py`, line 85).
+Failed jobs are retried with exponential backoff up to `ARQ_MAX_RETRIES = 3` times (`app/core/config.py`).
 
 ## 11. API Design
 
-The API follows RESTful conventions with versioned routing under `/api/v1/`. All endpoints are defined in `app/api/v1/routes/` and registered in `app/main.py` (lines 187–189). Authentication is handled via JWT tokens (`PyJWT==2.12.1`) and an API-key mechanism for integration clients (`app/core/api_key_auth.py`).
+The API follows RESTful conventions with versioned routing under `/api/v1/`. All endpoints are defined in `app/api/v1/routes/` and registered in `app/main.py`. Authentication is handled via JWT tokens (`PyJWT==2.12.1`) and an API-key mechanism for integration clients (`app/core/api_key_auth.py`).
 
 ### 11.1 Endpoint Reference
 
 | Method | Path | Purpose | Source File |
 |---|---|---|---|
-| `POST` | `/api/v1/chat/message` | Send a chat message and receive AI response | `app/api/v1/routes/chat.py` (lines 43–59) |
-| `POST` | `/api/v1/chat/session` | Create a new chat session | `app/api/v1/routes/chat.py` (lines 62–70) |
-| `GET` | `/api/v1/chat/history/{session_id}` | Retrieve paginated message history | `app/api/v1/routes/chat.py` (lines 73–84) |
-| `GET` | `/api/v1/sessions` | List user sessions (paginated) | `app/api/v1/routes/sessions.py` (lines 25–32) |
-| `DELETE` | `/api/v1/sessions/{session_id}` | Delete a session | `app/api/v1/routes/sessions.py` (lines 35–42) |
-| `PATCH` | `/api/v1/sessions/{session_id}` | Update session metadata | `app/api/v1/routes/sessions.py` (lines 46–54) |
-| `GET` | `/api/v1/health` | System health check (DB, Redis, Queue) | `app/api/v1/routes/health.py` (lines 14–57) |
-| `GET` | `/api/v1/health/cache/status` | Cache statistics | `app/api/v1/routes/health.py` (lines 64–81) |
-| `GET` | `/api/v1/health/cache/health` | Cache health check | `app/api/v1/routes/health.py` (lines 84–92) |
-| `POST` | `/api/v1/health/cache/clear/sessions` | Clear session cache | `app/api/v1/routes/health.py` (lines 95–108) |
-| `POST` | `/api/v1/health/cache/clear/prompts` | Clear prompt cache | `app/api/v1/routes/health.py` (lines 111–128) |
-| `POST` | `/api/v1/health/cache/warm` | Pre-load caches | `app/api/v1/routes/health.py` (lines 131–160) |
-| `POST` | `/api/v1/health/cache/reset` | Full cache reset | `app/api/v1/routes/health.py` (lines 163–187) |
-| `POST` | `/api/v1/health/cache/reload-prompt/{name}` | Hot-reload a single prompt | `app/api/v1/routes/health.py` (lines 190–216) |
+| `POST` | `/api/v1/chat/message` | Send a chat message and receive AI response | `app/api/v1/routes/chat.py` |
+| `POST` | `/api/v1/chat/session` | Create a new chat session | `app/api/v1/routes/chat.py` |
+| `GET` | `/api/v1/chat/history/{session_id}` | Retrieve paginated message history | `app/api/v1/routes/chat.py` |
+| `GET` | `/api/v1/sessions` | List user sessions (paginated) | `app/api/v1/routes/sessions.py` |
+| `DELETE` | `/api/v1/sessions/{session_id}` | Delete a session | `app/api/v1/routes/sessions.py` |
+| `PATCH` | `/api/v1/sessions/{session_id}` | Update session metadata | `app/api/v1/routes/sessions.py` |
+| `GET` | `/api/v1/health` | System health check (DB, Redis, Queue) | `app/api/v1/routes/health.py` |
+| `GET` | `/api/v1/health/cache/status` | Cache statistics | `app/api/v1/routes/health.py` |
+| `GET` | `/api/v1/health/cache/health` | Cache health check | `app/api/v1/routes/health.py` |
+| `POST` | `/api/v1/health/cache/clear/sessions` | Clear session cache | `app/api/v1/routes/health.py` |
+| `POST` | `/api/v1/health/cache/clear/prompts` | Clear prompt cache | `app/api/v1/routes/health.py` |
+| `POST` | `/api/v1/health/cache/warm` | Pre-load caches | `app/api/v1/routes/health.py` |
+| `POST` | `/api/v1/health/cache/reset` | Full cache reset | `app/api/v1/routes/health.py` |
+| `POST` | `/api/v1/health/cache/reload-prompt/{name}` | Hot-reload a single prompt | `app/api/v1/routes/health.py` |
 
 ### 11.2 Typical Request Flow
 
@@ -537,7 +537,7 @@ graph TD
 API controllers are intentionally thin. The `send_chat_message` endpoint, for example, performs only authentication resolution before delegating entirely to the application service:
 
 ```python
-# app/api/v1/routes/chat.py (lines 43-59)
+# app/api/v1/routes/chat.py
 @router.post("/message", response_model=Union[ChatIntegrationResponse, ChatMessageResponse])
 async def send_chat_message(
     request: ChatMessageRequest,
@@ -602,8 +602,8 @@ No automated benchmarking scripts, load testing results, or test coverage report
 | Database Tables (Chatbot DB) | 6 | `app/models/chatbot/` (verified count) |
 | Registered AI Tools | 3 | `app/ai/tools/` (verified count) |
 | Fast Path Response Types | 4 (greeting, identity, thanks, goodbye) | `app/ai/fast_path_router.py` |
-| Estimated tokens saved per fast-path hit | ~1,400 | `app/ai/fast_path_router.py` (lines 183–184) |
-| Semantic Cache Max Size | 5,000 entries | `app/services/semantic_cache_service.py` (line 26) |
+| Estimated tokens saved per fast-path hit | ~1,400 | `app/ai/fast_path_router.py` |
+| Semantic Cache Max Size | 5,000 entries | `app/services/semantic_cache_service.py` |
 | Unit Test Files | 10 | `tests/unit/` |
 | Integration Test Files | 7 | `tests/integration/` |
 | Average response latency | **[VERIFY]** — no benchmarks found | — |
@@ -613,17 +613,17 @@ No automated benchmarking scripts, load testing results, or test coverage report
 
 Several non-trivial engineering challenges were encountered and resolved during development:
 
-1. **Booking Intent Routing Bug**: The original `IntentRouter` routed high-confidence `booking` intents to `fast_path`, which only handled greetings. This caused booking requests to receive responses without tool access. The fix introduced a `FastPathRouter.match()` check at the `ChatApplicationService` level, with a fallthrough to the full LLM pipeline on miss. The deprecated code is preserved with a detailed explanation in `app/services/ai_orchestrator.py` (lines 480–524).
+1. **Booking Intent Routing Bug**: The original `IntentRouter` routed high-confidence `booking` intents to `fast_path`, which only handled greetings. This caused booking requests to receive responses without tool access. The fix introduced a `FastPathRouter.match()` check at the `ChatApplicationService` level, with a fallthrough to the full LLM pipeline on miss. The deprecated code is preserved with a detailed explanation in `app/services/ai_orchestrator.py`.
 
 2. **Prompt Injection Defense**: The system implements a multi-layered defense against prompt injection attacks:
-   - **Input Layer**: `InputSafetyGuard` (`app/ai/safety.py`, lines 31–43) blocks messages matching injection patterns (e.g., "ignore previous instructions", "you are now").
-   - **History Layer**: `ResponseValidator.sanitize_history()` (`app/ai/safety.py`, lines 74–102) drops history messages with injection patterns and limits content to 2,000 characters.
-   - **Tool Output Layer**: Two-layer semantic firewall in the orchestrator (lines 259–283) strips forbidden keys and injection markers from tool results.
+   - **Input Layer**: `InputSafetyGuard` (`app/ai/safety.py`) blocks messages matching injection patterns (e.g., "ignore previous instructions", "you are now").
+   - **History Layer**: `ResponseValidator.sanitize_history()` (`app/ai/safety.py`) drops history messages with injection patterns and limits content to 2,000 characters.
+   - **Tool Output Layer**: Two-layer semantic firewall in the orchestrator strips forbidden keys and injection markers from tool results.
    - **Synthesis Isolation**: The Renderer Engine never receives tool definitions, only results, preventing hallucinated tool calls.
 
-3. **Lock Transfer for Background Persistence**: To maintain both low latency and strict message ordering, the system transfers the distributed lock from the request handler to the background persistence task, rather than releasing it before response. This is documented in `app/services/chat_application_service.py` (lines 334–368).
+3. **Lock Transfer for Background Persistence**: To maintain both low latency and strict message ordering, the system transfers the distributed lock from the request handler to the background persistence task, rather than releasing it before response. This is documented in `app/services/chat_application_service.py`.
 
-4. **Database URL Normalization**: The configuration layer (`app/core/config.py`, lines 109–138) handles automatic conversion of `postgresql://` URLs to `postgresql+asyncpg://`, SSL parameter normalization for cloud providers (Neon), and Redis hostname cleanup for Upstash-style URLs.
+4. **Database URL Normalization**: The configuration layer (`app/core/config.py`) handles automatic conversion of `postgresql://` URLs to `postgresql+asyncpg://`, SSL parameter normalization for cloud providers (Neon), and Redis hostname cleanup for Upstash-style URLs.
 
 ## 15. Future Work and Possible Extensions
 
@@ -631,7 +631,7 @@ Several non-trivial engineering challenges were encountered and resolved during 
 2. **Advanced Recommendation Engine**: Replace the current semantic search with a collaborative filtering system that learns from user booking history and preferences.
 3. **Multi-Tenant Support**: Generalize the system to serve multiple event booking platforms with isolated data and custom branding.
 4. **Automated Load Testing**: Implement performance benchmarking scripts to quantify response latencies, throughput under load, and token cost per conversation.
-5. **Full Tool Implementation**: The `create_ticket` and `search_orders` tools currently return mock data (`app/ai/tools/ticket_tools.py`, line 21; `app/ai/tools/order_tools.py`, line 21). These should be connected to real booking and order management APIs.
+5. **Full Tool Implementation**: The `create_ticket` and `search_orders` tools currently return mock data (`app/ai/tools/ticket_tools.py`; `app/ai/tools/order_tools.py`). These should be connected to real booking and order management APIs.
 6. **Streaming Responses**: Implement Server-Sent Events (SSE) or WebSocket-based streaming to display AI responses token-by-token for improved perceived latency.
 7. **Observability and OpenTelemetry**: Implement comprehensive observability using OpenTelemetry to trace requests across all microservices, LLM providers, and databases.
 8. **Analytics Dashboard**: Develop a specialized dashboard to monitor chatbot performance, track user engagement, and visualize key metrics (e.g., token usage, fallback rates).

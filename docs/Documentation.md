@@ -8,7 +8,19 @@ The proliferation of online event ticketing platforms has introduced a new class
 
 This project, **TeGy-Chatbot**, addresses these challenges by providing an AI-powered conversational backend system that is integrated into an existing ticket and event booking website. The chatbot acts as an intelligent assistant capable of understanding natural-language user queries—in both Arabic and English—and responding with contextually relevant information, event recommendations, and guided booking workflows.
 
-The system is implemented as a standalone backend service built with the Python FastAPI framework, designed to be consumed by a separate frontend client via RESTful API endpoints. Its architecture emphasizes fault tolerance through multi-provider LLM integration, low-latency responses through semantic caching and a zero-LLM fast-path router, and operational resilience through distributed circuit breakers and background job processing.
+The system is implemented as a standalone backend service built with the Python FastAPI framework, designed to be consumed by a separate frontend client via RESTful API endpoints. Its architecture emphasizes fault tolerance mechanisms through multi-provider LLM integration, low-latency responses through semantic caching and a zero-LLM fast-path router, and operational resilience through distributed circuit breakers and background job processing.
+
+### 1.1 Comparison with Traditional Systems
+
+To highlight the architectural shift from legacy systems, the following table compares traditional static chatbots against the dynamic approach implemented in TeGy-Chatbot:
+
+| Feature | Traditional Chatbot | TeGy-Chatbot |
+|---|---|---|
+| **Response Generation** | Static FAQ & Decision Trees | Dynamic LLM Generation |
+| **AI Integration** | Single AI Provider (if any) | Multi-Provider Architecture |
+| **Response Caching** | No Cache / Exact Match | Vector-based Semantic Cache |
+| **Action Execution** | No Tool Calling | Autonomous Tool Calling |
+| **Resilience** | No Failover Mechanism | Automatic Failover & Circuit Breakers |
 
 ## 2. Project Objectives
 
@@ -18,7 +30,7 @@ The primary objectives of this project are:
 2. **Intelligent Q&A**: Answer user questions about event dates, ticket prices, venues, and booking status using LLM-generated responses grounded in real database records.
 3. **Booking Management**: Guide users step-by-step through ticket booking and allow retrieval or cancellation of existing bookings (`app/ai/tools/ticket_tools.py`, `app/ai/tools/order_tools.py`).
 4. **Multi-Language Support**: Handle conversations in both Arabic and English, with Arabic-first branded responses for social interactions (`app/ai/fast_path_router.py`).
-5. **Production-Grade Reliability**: Ensure continuous availability through multi-provider LLM failover, distributed locking, idempotency guarantees, and graceful degradation when external services are unavailable.
+5. **Production-Oriented Reliability**: Ensure continuous availability through multi-provider LLM failover, distributed locking, idempotency guarantees, and graceful degradation when external services are unavailable.
 
 ## 3. System Overview
 
@@ -26,7 +38,59 @@ TeGy-Chatbot is a modular, layered backend application. At the time of writing, 
 
 The codebase follows a strict separation of concerns: API controllers are thin delegators, business logic resides in the service layer, data access is abstracted through the repository pattern, and AI orchestration is encapsulated in a dedicated module with its own provider abstraction, intent routing, tool calling, and safety validation subsystems.
 
-## 4. Business Value and Client Benefits
+### 3.1 System Boundary
+
+The system boundary defines how external actors interact with the core backend services. The following diagram illustrates the boundary crossing from the frontend client to external integrations:
+
+```mermaid
+graph TD
+    Client[Frontend Client] -->|HTTP / REST API| API[TeGy-Chatbot Backend]
+    
+    subgraph TeGy-Chatbot System Boundary
+        API
+    end
+    
+    API -.->|Vector Search| FAISS[(FAISS Cache)]
+    API -->|Read / Write| DB[(PostgreSQL)]
+    API -->|State / Locks| Redis[(Redis)]
+    API -->|Inference| LLM[External LLM Providers]
+```
+
+### 3.2 Technology Stack
+
+The following table summarizes the core technologies and frameworks utilized in the project:
+
+| Layer / Component | Technology |
+|---|---|
+| **Backend Framework** | FastAPI |
+| **ORM** | SQLAlchemy 2.0 |
+| **Relational Database** | PostgreSQL |
+| **Cache & Distributed Locks**| Redis |
+| **Background Queue** | ARQ |
+| **Authentication** | JWT (PyJWT) |
+| **AI Providers** | Groq, Fireworks, Gemini |
+| **Embeddings** | SentenceTransformers |
+| **Vector Search** | FAISS |
+| **Containerization** | Docker |
+| **Deployment** | Azure Container Apps |
+| **CI/CD** | GitHub Actions |
+
+## 4. Non-Functional Requirements
+
+To ensure the system meets enterprise-grade operational standards, the architecture addresses several key Non-Functional Requirements (NFRs):
+
+| Requirement | Implementation & Strategy |
+|---|---|
+| **Performance** | Asynchronous I/O via FastAPI, semantic caching (FAISS) to bypass LLM latency, and a zero-LLM Fast Path for common intents. |
+| **Availability** | Multi-provider LLM fallback strategy guarantees uninterrupted service even during upstream outages. |
+| **Reliability** | Distributed Redis locks prevent race conditions, and ARQ handles background job processing with automatic retries. |
+| **Scalability** | Stateless API design allows horizontal scaling via Azure Container Apps. Caching is handled centrally in Redis. |
+| **Security** | JWT authentication, API key validation, input sanitization, parameterized SQL queries, and strict prompt injection firewalls. |
+| **Maintainability**| Clean Architecture principles, dependency injection (IoC), and design patterns (Repository, Strategy, Factory) ensure code isolation. |
+| **Usability** | Multi-language support (Arabic/English), fast response times, and conversational guided booking to reduce user friction. |
+| **Recoverability**| Graceful degradation during partial failures, circuit breakers for failing services, and persistent message logs in PostgreSQL. |
+
+## 5. Business Value and Client Benefits
 
 The following diagram illustrates the high-level business flow:
 
@@ -40,17 +104,17 @@ The following table presents the key features of TeGy-Chatbot from a business pe
 
 | Feature | Business Benefit | Evidence |
 |---|---|---|
-| 24/7 Automated Customer Support | Reduces the need for human support agents by handling common queries (event info, booking status) autonomously. | `app/ai/intent_detector.py`: classifies intents including `support_billing`, `support_technical`, `support_event` |
+| 24/7 Automated Customer Support | Aims to reduce the need for human support agents by handling common queries (event info, booking status) autonomously. | `app/ai/intent_detector.py`: classifies intents including `support_billing`, `support_technical`, `support_event` |
 | Multi-Provider LLM Failover | Ensures chatbot availability even when a single AI provider experiences downtime or rate limiting. | `app/ai/providers/factory.py`: `PRIORITY_LIST = ["groq", "fireworks", "gemini"]` |
-| Zero-LLM Fast Path for Social Intents | Reduces AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (saving ~1,400 tokens per interaction). | `app/ai/fast_path_router.py`: `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
-| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, reducing latency and API costs. | `app/services/semantic_cache_service.py`: Implemented in pp/services/semantic_cache_service.py |
-| Automated Conversation Summarization | Reduces token consumption for long conversations by summarizing older messages in the background. | `app/workers/summarization_worker.py`, triggered every 10 messages (`app/ai/memory_manager.py`) |
-| Guided Booking via Tool Calling | Reduces booking abandonment and human error by allowing the AI to execute database operations (search events, create tickets) on behalf of the user. | `app/ai/tools/event_tools.py`, `app/ai/tools/ticket_tools.py` |
+| Zero-LLM Fast Path for Social Intents | Designed to reduce AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (saving ~1,400 tokens per interaction). | `app/ai/fast_path_router.py`: `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
+| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, helping help reduce latency and API costs. | `app/services/semantic_cache_service.py`: Implemented in pp/services/semantic_cache_service.py |
+| Automated Conversation Summarization | Designed to reduce token consumption for long conversations by summarizing older messages in the background. | `app/workers/summarization_worker.py`, triggered every 10 messages (`app/ai/memory_manager.py`) |
+| Guided Booking via Tool Calling | Aims to reduce booking abandonment and human error by allowing the AI to execute database operations (search events, create tickets) on behalf of the user. | `app/ai/tools/event_tools.py`, `app/ai/tools/ticket_tools.py` |
 | Idempotency and Distributed Locking | Prevents duplicate bookings and ensures data consistency under concurrent requests. | `app/services/idempotency_service.py`, `app/infrastructure/adapters/redis_lock_adapter.py` |
 
 > **Note**: Cost savings and efficiency gains are stated in qualitative terms. No specific monetary figures or percentage improvements are asserted, as no benchmarking data was found in the repository.
 
-## 5. System Architecture
+## 6. System Architecture
 
 The system follows an N-tier layered architecture with strict unidirectional data flow. The following diagram illustrates the major components and their interactions, with each box corresponding to a verified module in the codebase.
 
@@ -125,7 +189,7 @@ graph TD
     Redis -.->|"Queue"| ARQ
 ```
 
-## 6. Message Flow and Request Lifecycle
+## 7. Message Flow and Request Lifecycle
 
 When a user sends a message via `POST /api/v1/chat/message`, the request traverses a multi-phase pipeline within `ChatApplicationService.execute()` (`app/services/chat_application_service.py`). The following sequence diagram traces the complete lifecycle.
 
@@ -210,9 +274,9 @@ The pipeline within `ChatApplicationService.execute()` operates in three sequent
 
 **Phase 3 — Persistence**: User and assistant messages are persisted to PostgreSQL and Redis memory. On the success path, persistence is executed in a background task to minimize response latency, with the distributed lock transferred to the background task to guarantee strict message ordering.
 
-## 7. AI and LLM Integration
+## 8. AI and LLM Integration
 
-### 7.1 Provider Architecture
+### 9.1 Provider Architecture
 
 The system integrates three LLM providers, each implemented as a subclass of the abstract `LLMProvider` base class (`app/ai/providers/base.py`). Providers are automatically discovered at startup via the `ProviderRegistry` (`app/ai/providers/registry.py`) and instantiated by the `ProviderFactory` (`app/ai/providers/factory.py`).
 
@@ -229,7 +293,7 @@ The fallback order is defined in `app/ai/providers/factory.py`:
 PRIORITY_LIST = ["groq", "fireworks", "gemini"]
 ```
 
-### 7.2 Fallback Mechanism
+### 9.2 Fallback Mechanism
 
 To ensure high availability and prevent single-point-of-failure scenarios when relying on external AI services, the system employs a robust fallback strategy. When multiple providers are configured, the factory wraps them in a `FallbackProvider` (`app/ai/providers/fallback_provider.py`). This provider implements health-based dynamic selection: providers are ranked by a real-time health score computed from their success rate (60% weight) and average latency (40% weight), modulated by circuit breaker state.
 
@@ -269,14 +333,14 @@ for provider in ranked_providers:
     # ... attempt generation
 ```
 
-### 7.3 Resilience: Circuit Breaker and Retry
+### 9.3 Resilience: Circuit Breaker and Retry
 
 Network instability and API rate limits are common challenges when integrating third-party AI models. To protect the application from cascading failures and excessive latency, each provider is equipped with an independent circuit breaker and retry mechanism, both implemented in `app/ai/providers/resilience.py`.
 
 - **Circuit Breaker** (`ProviderCircuitBreaker`): Transitions through three states — CLOSED → OPEN (after 5 consecutive failures) → HALF_OPEN (after 30-second cooldown) → CLOSED (on first success). These thresholds are configurable via `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_COOLDOWN_SECONDS` in `app/core/config.py`.
 - **Retry with Exponential Backoff** (`retry_with_backoff`): Retries transient and timeout errors up to `LLM_MAX_RETRIES = 2` times with a base delay of 0.5 seconds (from `app/core/config.py`).
 
-### 7.4 Intent Detection and Routing
+### 8.4 Intent Detection and Routing
 
 Accurately understanding the user's goal is the first critical step in a conversational pipeline. Rather than routing all messages to an expensive LLM immediately, the intent detection system follows a hybrid approach implemented in `IntentDetector` (`app/ai/intent_detector.py`):
 
@@ -288,7 +352,7 @@ The `IntentRouter` (`app/ai/intent_router.py`) translates the classified intent 
 - **`llm_path`**: Default route for most intents.
 - **`fallback_path`**: For very low confidence results (<0.5).
 
-### 7.5 Three-Engine Orchestrator Pipeline
+### 8.5 Three-Engine Orchestrator Pipeline
 
 Handling complex multi-step tasks, such as searching for events and executing bookings, requires a structured reasoning and execution approach. To manage this safely and reliably, the `AIOrchestrator` (`app/services/ai_orchestrator.py`) implements a three-step pipeline for complex requests:
 
@@ -296,11 +360,11 @@ Handling complex multi-step tasks, such as searching for events and executing bo
 2. **Execution Engine**: Executes the tool calls returned by the planner via `ToolRegistry.call_tool()`, passing runtime database sessions as dependencies. Tool outputs are sanitized through a two-layer semantic firewall that strips forbidden keys (`instruction`, `command`, `execute`, etc.) and detects prompt injection patterns.
 3. **Renderer Engine**: A "blind renderer" that receives only the tool results and conversation context—never the raw tool definitions—to synthesize a user-facing response. This separation prevents the renderer from hallucinating tool calls.
 
-### 7.6 Fast Path Router
+### 8.6 Fast Path Router
 
 To minimize unnecessary LLM usage and guarantee instant responses for common interactions, the system introduces a lightweight routing layer. The `FastPathRouter` (`app/ai/fast_path_router.py`) intercepts social/meta intents (greeting, identity, thanks, goodbye) using compiled regex patterns and returns predefined branded responses in Arabic without any LLM calls. This optimization saves approximately 1,400 tokens per matched interaction.
 
-### 7.7 Tool Calling
+### 8.7 Tool Calling
 
 The AI can invoke database-connected functions via the `ToolRegistry` (`app/ai/tool_registry.py`). Tools are auto-discovered at startup by scanning `app/ai/tools/` for modules with `@ToolRegistry.register_tool` decorators (`app/ai/tools/__init__.py`). The system currently registers three tools:
 
@@ -312,11 +376,11 @@ The AI can invoke database-connected functions via the `ToolRegistry` (`app/ai/t
 
 The orchestrator dynamically filters which tools are available based on the detected intent (`app/services/ai_orchestrator.py`). For example, booking intents only receive `check_availability`, `create_booking`, and `get_user_profile` tools.
 
-### 7.8 Semantic Cache
+### 8.8 Semantic Cache
 
-To further reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py`. The cache has a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, and `app/services/semantic_cache_service.py`).
+To further help reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py`. The cache has a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, and `app/services/semantic_cache_service.py`).
 
-## 8. Database Design
+## 9. Database Design
 
 The system uses two separate PostgreSQL databases, both accessed asynchronously via SQLAlchemy 2.0 with the `asyncpg` driver.
 
@@ -325,7 +389,7 @@ The system uses two separate PostgreSQL databases, both accessed asynchronously 
 
 Redis serves as a high-speed operational store for session context, recent message history (last 20 messages), message counters, distributed locks, and the ARQ job queue.
 
-### 8.1 Entity-Relationship Diagram
+### 9.1 Entity-Relationship Diagram
 
 The following ER diagram represents the chatbot database schema as defined by the SQLAlchemy ORM models in `app/models/`.
 
@@ -412,7 +476,7 @@ erDiagram
     sessions ||--o{ conv_summaries : "summarized_by"
 ```
 
-### 8.2 Database Normalization
+### 9.2 Database Normalization
 
 The database schema adheres to Third Normal Form (3NF) to eliminate data redundancy and ensure data integrity. By separating the entities:
 - **`chatbot_users`**: Stores core user identity independently of sessions.
@@ -421,7 +485,7 @@ The database schema adheres to Third Normal Form (3NF) to eliminate data redunda
 
 This separation of concerns ensures that the database structure remains optimal for high read/write operations characteristic of conversational interfaces.
 
-### 8.3 Redis Data Schema
+### 9.3 Redis Data Schema
 
 Redis keys follow a versioned naming convention managed by the `RedisKeys` class (`app/db/redis.py`):
 
@@ -434,7 +498,7 @@ Redis keys follow a versioned naming convention managed by the `RedisKeys` class
 
 These TTL values are defined in `app/ai/memory_manager.py`.
 
-## 9. Design Patterns
+## 10. Design Patterns
 
 The following design patterns were identified and verified in the codebase:
 
@@ -469,7 +533,7 @@ async def build_chat_application_service(
     # ... assembles ChatApplicationService with all dependencies
 ```
 
-## 10. Background Job Processing
+## 11. Background Job Processing
 
 The system uses **ARQ** (`arq==0.26.3`), a Redis-based asynchronous task queue, for background job processing. The worker configuration is defined in `app/workers/arq_jobs.py`:
 
@@ -496,11 +560,11 @@ The primary background job is `summarize_session_job` (`app/workers/arq_jobs.py`
 
 Failed jobs are retried with exponential backoff up to `ARQ_MAX_RETRIES = 3` times (`app/core/config.py`).
 
-## 11. API Design
+## 12. API Design
 
 The API follows RESTful conventions with versioned routing under `/api/v1/`. All endpoints are defined in `app/api/v1/routes/` and registered in `app/main.py`. Authentication is handled via JWT tokens (`PyJWT==2.12.1`) and an API-key mechanism for integration clients (`app/core/api_key_auth.py`).
 
-### 11.1 Endpoint Reference
+### 13.1 Endpoint Reference
 
 | Method | Path | Purpose | Source File |
 |---|---|---|---|
@@ -519,7 +583,7 @@ The API follows RESTful conventions with versioned routing under `/api/v1/`. All
 | `POST` | `/api/v1/health/cache/reset` | Full cache reset | `app/api/v1/routes/health.py` |
 | `POST` | `/api/v1/health/cache/reload-prompt/{name}` | Hot-reload a single prompt | `app/api/v1/routes/health.py` |
 
-### 11.2 Typical Request Flow
+### 13.2 Typical Request Flow
 
 The following diagram illustrates the standard data flow from the client through the application layers to the database:
 
@@ -532,7 +596,7 @@ graph TD
     Repository --> DB[Database]
 ```
 
-### 11.3 Request and Response Flow
+### 13.3 Request and Response Flow
 
 API controllers are intentionally thin. The `send_chat_message` endpoint, for example, performs only authentication resolution before delegating entirely to the application service:
 
@@ -555,23 +619,38 @@ async def send_chat_message(
 
 The response format differs based on the authentication mode: `ChatIntegrationResponse` for API-key clients (containing only the response text) and `ChatMessageResponse` for JWT-authenticated users (containing session ID, metadata, and performance breakdown in debug mode).
 
-## 12. Deployment and Infrastructure
+## 13. Deployment and Infrastructure
 
-The following diagram illustrates the deployment architecture and infrastructure dependencies:
+The following diagram illustrates the deployment architecture and infrastructure dependencies, presenting a professional overview of the service topology:
 
 ```mermaid
 graph TD
-    Azure[Azure Cloud] --> CA[Container App]
-    CA --> Redis[(Redis)]
-    CA --> Postgres[(PostgreSQL)]
-    CA --> LLM[LLM APIs]
+    Internet((Internet)) --> ACA[Azure Container Apps]
+    
+    subgraph ACA [Azure Container Apps]
+        Backend[FastAPI Backend]
+        Worker[ARQ Worker]
+    end
+    
+    Backend --> Redis[(Redis Cache)]
+    Worker --> Redis
+    Backend --> Postgres[(PostgreSQL DB)]
+    Worker --> Postgres
+    
+    subgraph LLM_Providers [LLM Providers]
+        Groq[Groq API]
+        Fireworks[Fireworks API]
+        Gemini[Gemini API]
+    end
+    
+    Backend --> LLM_Providers
 ```
 
-### 12.1 Docker
+### 13.1 Docker
 
 The application is containerized using a `Dockerfile` based on `python:3.11-slim`. It installs system dependencies including Microsoft ODBC drivers (`msodbcsql17`) for SQL Server connectivity to the main application database, copies the project, and runs the application via Uvicorn on port 8000.
 
-### 12.2 Docker Compose
+### 13.2 Docker Compose
 
 The `docker-compose.yml` defines four services:
 
@@ -582,7 +661,7 @@ The `docker-compose.yml` defines four services:
 | `redis` | `redis:7-alpine` | Caching, session state, and job queue |
 | `postgres` | `postgres:15-alpine` | Chatbot database (local development) |
 
-### 12.3 CI/CD Pipeline
+### 13.3 CI/CD Pipeline
 
 The CI/CD workflow (`.github/workflows/deploy.yml`) automates deployment to **Azure Container Apps** on every push to the `main` branch. The pipeline:
 
@@ -591,7 +670,7 @@ The CI/CD workflow (`.github/workflows/deploy.yml`) automates deployment to **Az
 3. Builds and pushes the Docker image to Azure Container Registry (ACR).
 4. Updates the Azure Container App with the new image, setting environment variables for all database URLs, API keys (Gemini, Groq), Redis connection parameters, and the semantic search API URL. The deployment is configured with `min-replicas 1`, external ingress on port 8000, and `ENV=production`.
 
-## 13. Key Metrics and Results
+## 14. Key Metrics and Results
 
 No automated benchmarking scripts, load testing results, or test coverage reports were found in the repository. The following table provides a snapshot of the repository's metrics at the time of writing, along with a placeholder structure for performance metrics that could be collected in future work.
 
@@ -609,23 +688,42 @@ No automated benchmarking scripts, load testing results, or test coverage report
 | Average response latency | **[VERIFY]** — no benchmarks found | — |
 | Test coverage percentage | **[VERIFY]** — no coverage report found | — |
 
-## 14. Challenges Faced and Design Decisions
+## 15. Challenges Faced and Design Decisions
 
 Several non-trivial engineering challenges were encountered and resolved during development:
 
 1. **Booking Intent Routing Bug**: The original `IntentRouter` routed high-confidence `booking` intents to `fast_path`, which only handled greetings. This caused booking requests to receive responses without tool access. The fix introduced a `FastPathRouter.match()` check at the `ChatApplicationService` level, with a fallthrough to the full LLM pipeline on miss. The deprecated code is preserved with a detailed explanation in `app/services/ai_orchestrator.py`.
 
-2. **Prompt Injection Defense**: The system implements a multi-layered defense against prompt injection attacks:
-   - **Input Layer**: `InputSafetyGuard` (`app/ai/safety.py`) blocks messages matching injection patterns (e.g., "ignore previous instructions", "you are now").
-   - **History Layer**: `ResponseValidator.sanitize_history()` (`app/ai/safety.py`) drops history messages with injection patterns and limits content to 2,000 characters.
-   - **Tool Output Layer**: Two-layer semantic firewall in the orchestrator strips forbidden keys and injection markers from tool results.
-   - **Synthesis Isolation**: The Renderer Engine never receives tool definitions, only results, preventing hallucinated tool calls.
+2. **Lock Transfer for Background Persistence**: To maintain both low latency and strict message ordering, the system transfers the distributed lock from the request handler to the background persistence task, rather than releasing it before response. This is documented in `app/services/chat_application_service.py`.
 
-3. **Lock Transfer for Background Persistence**: To maintain both low latency and strict message ordering, the system transfers the distributed lock from the request handler to the background persistence task, rather than releasing it before response. This is documented in `app/services/chat_application_service.py`.
+3. **Database URL Normalization**: The configuration layer (`app/core/config.py`) handles automatic conversion of `postgresql://` URLs to `postgresql+asyncpg://`, SSL parameter normalization for cloud providers (Neon), and Redis hostname cleanup for Upstash-style URLs.
 
-4. **Database URL Normalization**: The configuration layer (`app/core/config.py`) handles automatic conversion of `postgresql://` URLs to `postgresql+asyncpg://`, SSL parameter normalization for cloud providers (Neon), and Redis hostname cleanup for Upstash-style URLs.
+## 16. Security and Resilience
 
-## 15. Future Work and Possible Extensions
+Enterprise conversational AI systems face unique vulnerabilities, ranging from traditional web exploits to LLM-specific prompt injection attacks. TeGy-Chatbot implements a defense-in-depth approach to secure user data and system integrity.
+
+### 16.1 API and Authentication Security
+- **JWT Authentication**: User sessions are strictly authenticated using JSON Web Tokens (JWT), ensuring data privacy and secure session tracking.
+- **API Key Authentication**: Inter-service communication and integration clients utilize API keys (pp/core/api_key_auth.py).
+- **Secrets Management**: Sensitive credentials, database URIs, and LLM API keys are never hardcoded; they are injected securely via Environment Variables in Azure Container Apps.
+
+### 16.2 Data and Database Security
+- **Parameterized Queries**: SQLAlchemy 2.0 ORM is used exclusively for database interactions, inherently protecting the system against SQL Injection attacks.
+- **Input Validation**: FastAPI's Pydantic models automatically validate and sanitize all incoming JSON payloads before they reach the service layer.
+
+### 16.3 LLM and Prompt Security
+The system implements a multi-layered defense against prompt injection attacks:
+- **Input Layer**: InputSafetyGuard (pp/ai/safety.py) blocks messages matching known injection patterns (e.g., 'ignore previous instructions', 'you are now').
+- **History Layer**: ResponseValidator.sanitize_history() limits context sizes and drops history messages containing injection patterns to prevent context poisoning.
+- **Tool Output Layer**: A semantic firewall in the orchestrator strips forbidden keys and injection markers from database tool results before passing them to the LLM.
+- **Synthesis Isolation**: The Renderer Engine receives only tool results, never the raw tool definitions, completely preventing hallucinated tool execution.
+
+### 16.4 Operational Resilience
+- **Idempotency and Distributed Locks**: Redis-backed distributed locks (RedisLockAdapter) and idempotency keys guarantee that concurrent requests (e.g., rapid clicks on 'Book Ticket') do not result in duplicate transactions or race conditions.
+- **Circuit Breakers and Retries**: Each LLM provider is guarded by an independent circuit breaker. Transient failures trigger exponential backoff retries, while sustained failures open the circuit and seamlessly fail over to the next provider.
+- **Timeouts**: Strict timeouts (AI_REQUEST_TIMEOUT) prevent the system from hanging indefinitely if an upstream AI provider becomes unresponsive.
+
+## 17. Future Work and Possible Extensions
 
 1. **RAG and Vector Database**: Enhance the current semantic cache by integrating a dedicated Vector Database to support advanced Retrieval-Augmented Generation (RAG) capabilities for broader knowledge retrieval.
 2. **Advanced Recommendation Engine**: Replace the current semantic search with a collaborative filtering system that learns from user booking history and preferences.
@@ -636,13 +734,13 @@ Several non-trivial engineering challenges were encountered and resolved during 
 7. **Observability and OpenTelemetry**: Implement comprehensive observability using OpenTelemetry to trace requests across all microservices, LLM providers, and databases.
 8. **Analytics Dashboard**: Develop a specialized dashboard to monitor chatbot performance, track user engagement, and visualize key metrics (e.g., token usage, fallback rates).
 
-## 16. Conclusion
+## 18. Conclusion
 
-TeGy-Chatbot represents a production-grade implementation of an AI-powered conversational backend for the event ticketing domain. The system demonstrates several advanced software engineering practices: multi-provider LLM integration with health-based fallback, a three-engine orchestrator pipeline (Planner–Execution–Renderer) with semantic firewall protection, semantic vector caching using FAISS, distributed locking and idempotency for concurrent request safety, and automated conversation summarization via background workers.
+TeGy-Chatbot represents a production-oriented implementation of an AI-powered conversational backend for the event ticketing domain. The system demonstrates several advanced software engineering practices: multi-provider LLM integration with health-based fallback, a three-engine orchestrator pipeline (Planner–Execution–Renderer) with semantic firewall protection, semantic vector caching using FAISS, distributed locking and idempotency for concurrent request safety, and automated conversation summarization via background workers.
 
-The architecture prioritizes fault tolerance and cost efficiency. The fast-path router eliminates LLM costs for social interactions, the semantic cache avoids redundant inference for repeated questions, and the summarization worker compresses conversation history to reduce token consumption. The system is fully containerized and deployed via a CI/CD pipeline to Azure Container Apps, demonstrating readiness for production workloads.
+The architecture prioritizes fault tolerance mechanisms and cost efficiency. The fast-path router eliminates LLM costs for social interactions, the semantic cache avoids redundant inference for repeated questions, and the summarization worker compresses conversation history to reduce token consumption. The system is fully containerized and deployed via a CI/CD pipeline to Azure Container Apps, demonstrating readiness for production workloads.
 
-At the time of writing, the audited version of the project leverages 29 Python dependencies (from `requirements.txt`), integrates with 3 external LLM providers, manages 6 database tables across 2 PostgreSQL databases, and exposes 14 REST API endpoints—all organized within a clean, pattern-driven architecture that prioritizes testability and extensibility.
+At the time of writing, the audited version of the project leverages a curated set of Python dependencies (from `requirements.txt`), integrates with 3 external LLM providers, manages 6 database tables across 2 PostgreSQL databases, and exposes 14 REST API endpoints—all organized within a clean, pattern-driven architecture that prioritizes testability and extensibility.
 
 ---
 

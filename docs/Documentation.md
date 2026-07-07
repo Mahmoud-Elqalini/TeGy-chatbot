@@ -276,7 +276,7 @@ The pipeline within `ChatApplicationService.execute()` operates in three sequent
 
 ## 8. AI and LLM Integration
 
-### 9.1 Provider Architecture
+### 8.1 Provider Architecture
 
 The system integrates three LLM providers, each implemented as a subclass of the abstract `LLMProvider` base class (`app/ai/providers/base.py`). Providers are automatically discovered at startup via the `ProviderRegistry` (`app/ai/providers/registry.py`) and instantiated by the `ProviderFactory` (`app/ai/providers/factory.py`).
 
@@ -293,7 +293,7 @@ The fallback order is defined in `app/ai/providers/factory.py`:
 PRIORITY_LIST = ["groq", "fireworks", "gemini"]
 ```
 
-### 9.2 Fallback Mechanism
+### 8.2 Fallback Mechanism
 
 To ensure high availability and prevent single-point-of-failure scenarios when relying on external AI services, the system employs a robust fallback strategy. When multiple providers are configured, the factory wraps them in a `FallbackProvider` (`app/ai/providers/fallback_provider.py`). This provider implements health-based dynamic selection: providers are ranked by a real-time health score computed from their success rate (60% weight) and average latency (40% weight), modulated by circuit breaker state.
 
@@ -333,7 +333,7 @@ for provider in ranked_providers:
     # ... attempt generation
 ```
 
-### 9.3 Resilience: Circuit Breaker and Retry
+### 8.3 Resilience: Circuit Breaker and Retry
 
 Network instability and API rate limits are common challenges when integrating third-party AI models. To protect the application from cascading failures and excessive latency, each provider is equipped with an independent circuit breaker and retry mechanism, both implemented in `app/ai/providers/resilience.py`.
 
@@ -564,7 +564,7 @@ Failed jobs are retried with exponential backoff up to `ARQ_MAX_RETRIES = 3` tim
 
 The API follows RESTful conventions with versioned routing under `/api/v1/`. All endpoints are defined in `app/api/v1/routes/` and registered in `app/main.py`. Authentication is handled via JWT tokens (`PyJWT==2.12.1`) and an API-key mechanism for integration clients (`app/core/api_key_auth.py`).
 
-### 13.1 Endpoint Reference
+### 12.1 Endpoint Reference
 
 | Method | Path | Purpose | Source File |
 |---|---|---|---|
@@ -583,7 +583,7 @@ The API follows RESTful conventions with versioned routing under `/api/v1/`. All
 | `POST` | `/api/v1/health/cache/reset` | Full cache reset | `app/api/v1/routes/health.py` |
 | `POST` | `/api/v1/health/cache/reload-prompt/{name}` | Hot-reload a single prompt | `app/api/v1/routes/health.py` |
 
-### 13.2 Typical Request Flow
+### 12.2 Typical Request Flow
 
 The following diagram illustrates the standard data flow from the client through the application layers to the database:
 
@@ -596,7 +596,7 @@ graph TD
     Repository --> DB[Database]
 ```
 
-### 13.3 Request and Response Flow
+### 12.3 Request and Response Flow
 
 API controllers are intentionally thin. The `send_chat_message` endpoint, for example, performs only authentication resolution before delegating entirely to the application service:
 

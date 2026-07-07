@@ -8,6 +8,8 @@ The proliferation of online event ticketing platforms has introduced a new class
 
 This project, **TeGy-Chatbot**, addresses these challenges by providing an AI-powered conversational backend system that is integrated into an existing ticket and event booking website. The chatbot acts as an intelligent assistant capable of understanding natural-language user queries—in both Arabic and English—and responding with contextually relevant information, event recommendations, and guided booking workflows.
 
+Conversational AI has become a preferred interaction paradigm because it reduces navigation complexity and enables users to access services using natural language rather than manually browsing multiple interface screens.
+
 The system is implemented as a standalone backend service built with the Python FastAPI framework, designed to be consumed by a separate frontend client via RESTful API endpoints. Its architecture emphasizes fault tolerance mechanisms through multi-provider LLM integration, low-latency responses through semantic caching and a zero-LLM fast-path router, and operational resilience through distributed circuit breakers and background job processing.
 
 ### 1.1 Comparison with Traditional Systems
@@ -21,6 +23,8 @@ To highlight the architectural shift from legacy systems, the following table co
 | **Response Caching** | No Cache / Exact Match | Vector-based Semantic Cache |
 | **Action Execution** | No Tool Calling | Autonomous Tool Calling |
 | **Resilience** | No Failover Mechanism | Automatic Failover & Circuit Breakers |
+| **Deployment** | Monolithic | Cloud-native Containers |
+| **Scalability** | Vertical | Horizontal |
 
 ## 2. Project Objectives
 
@@ -31,10 +35,11 @@ The primary objectives of this project are:
 3. **Booking Management**: Guide users step-by-step through ticket booking and allow retrieval or cancellation of existing bookings (`app/ai/tools/ticket_tools.py`, `app/ai/tools/order_tools.py`).
 4. **Multi-Language Support**: Handle conversations in both Arabic and English, with Arabic-first branded responses for social interactions (`app/ai/fast_path_router.py`).
 5. **Production-Oriented Reliability**: Ensure continuous availability through multi-provider LLM failover, distributed locking, idempotency guarantees, and graceful degradation when external services are unavailable.
+6. **Extensible Architecture**: Provide an extensible backend architecture that can be integrated with different event booking platforms.
 
 ## 3. System Overview
 
-TeGy-Chatbot is a modular, layered backend application. At the time of writing, the audited version of the repository consists of approximately 60 Python source files organized across 11 primary packages. The system integrates three external LLM providers (Groq, Fireworks, Gemini), two databases (PostgreSQL and Redis), a background job queue (ARQ), and a semantic vector search engine (FAISS with SentenceTransformers). At the time of the audit, it exposes 14 REST API endpoints across three route groups: Chat, Sessions, and System Health.
+TeGy-Chatbot is a modular, layered backend application. At the time of writing, the audited version of the repository consists of over sixty source files organized across 11 primary packages. The system integrates three external LLM providers (Groq, Fireworks, Gemini), two databases (PostgreSQL and Redis), a background job queue (ARQ), and a semantic vector search engine (FAISS with SentenceTransformers). At the time of the audit, it exposes 14 REST API endpoints across three route groups: Chat, Sessions, and System Health.
 
 The codebase follows a strict separation of concerns: API controllers are thin delegators, business logic resides in the service layer, data access is abstracted through the repository pattern, and AI orchestration is encapsulated in a dedicated module with its own provider abstraction, intent routing, tool calling, and safety validation subsystems.
 

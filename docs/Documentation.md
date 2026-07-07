@@ -93,7 +93,7 @@ To ensure the system meets enterprise-grade operational standards, the architect
 | **Security** | JWT authentication, API key validation, input sanitization, parameterized SQL queries, and strict prompt injection firewalls. |
 | **Maintainability**| Clean Architecture principles, dependency injection (IoC), and design patterns (Repository, Strategy, Factory) ensure code isolation. |
 | **Usability** | Multi-language support (Arabic/English), fast response times, and conversational guided booking to reduce user friction. |
-| **Recoverability**| Graceful degradation during partial failures, circuit breakers for failing services, and persistent message logs in PostgreSQL. |
+| **Recoverability**| Background retries, distributed locks, database persistence, and graceful degradation. |
 
 ## 5. Business Value and Client Benefits
 
@@ -111,8 +111,8 @@ The following table presents the key features of TeGy-Chatbot from a business pe
 |---|---|---|
 | 24/7 Automated Customer Support | Aims to reduce the need for human support agents by handling common queries (event info, booking status) autonomously. | `app/ai/intent_detector.py`: classifies intents including `support_billing`, `support_technical`, `support_event` |
 | Multi-Provider LLM Failover | Ensures chatbot availability even when a single AI provider experiences downtime or rate limiting. | `app/ai/providers/factory.py`: `PRIORITY_LIST = ["groq", "fireworks", "gemini"]` |
-| Zero-LLM Fast Path for Social Intents | Designed to reduce AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (saving ~1,400 tokens per interaction). | `app/ai/fast_path_router.py`: `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
-| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, helping help reduce latency and API costs. | `app/services/semantic_cache_service.py`: Implemented in pp/services/semantic_cache_service.py |
+| Zero-LLM Fast Path for Social Intents | Designed to reduce AI API costs by handling greetings, thanks, and goodbyes with zero LLM calls (estimated token reduction of approximately 1400 tokens according to internal configuration constants). | `app/ai/fast_path_router.py`: `_PLANNER_AVG_TOKENS = 800`, `_RENDERER_AVG_TOKENS = 600` |
+| Semantic Caching | Avoids redundant LLM calls for semantically similar questions, helping reduce latency and API costs. | `app/services/semantic_cache_service.py`: Implemented in `app/services/semantic_cache_service.py` |
 | Automated Conversation Summarization | Designed to reduce token consumption for long conversations by summarizing older messages in the background. | `app/workers/summarization_worker.py`, triggered every 10 messages (`app/ai/memory_manager.py`) |
 | Guided Booking via Tool Calling | Aims to reduce booking abandonment and human error by allowing the AI to execute database operations (search events, create tickets) on behalf of the user. | `app/ai/tools/event_tools.py`, `app/ai/tools/ticket_tools.py` |
 | Idempotency and Distributed Locking | Prevents duplicate bookings and ensures data consistency under concurrent requests. | `app/services/idempotency_service.py`, `app/infrastructure/adapters/redis_lock_adapter.py` |
@@ -148,6 +148,13 @@ graph TD
         RG["ResponseGenerator"]
         TR["ToolRegistry"]
         SC["SemanticCacheService"]
+    end
+    
+    subgraph Repository_Layer["Repository Layer (app/repositories/)"]
+        MR["MessageRepository"]
+        SessR["SessionRepository"]
+        SumR["SummaryRepository"]
+        MemR["MemoryRepository"]
     end
 
     subgraph Provider_Layer["LLM Providers (app/ai/providers/)"]
@@ -185,18 +192,31 @@ graph TD
     FP --> FW
     FP --> Gemini
     TR -->|"Tool Execution"| PG
+    
+    CAS --> MR
+    SS --> SessR
+    SumJob --> SumR
+    CS --> MemR
+    
+    MR --> PG
+    SessR --> PG
+    SumR --> PG
+    MemR --> Redis
+    
     CAS --> Redis
-    SS --> PG
     SS --> Redis
     ARQ --> SumJob
-    SumJob --> PG
     SumJob --> RG
     Redis -.->|"Queue"| ARQ
 ```
 
 ## 7. Message Flow and Request Lifecycle
 
-When a user sends a message via `POST /api/v1/chat/message`, the request traverses a multi-phase pipeline within `ChatApplicationService.execute()` (`app/services/chat_application_service.py`). The following sequence diagram traces the complete lifecycle.
+When a user sends a message via `POST /api/v1/chat/message`, the request traverses a multi-phase pipeline within `ChatApplicationService.execute()` (`app/services/chat_application_service.py`). The lifecycle is divided into two main flows: the Fast Path (for social intents) and the LLM Pipeline (for complex requests).
+
+### 7.1 Flow A: Fast Path (Social Intents)
+
+The Fast Path intercepts simple intents like greetings and goodbyes, returning immediate branded responses without invoking the LLM.
 
 ```mermaid
 sequenceDiagram
@@ -204,6 +224,30 @@ sequenceDiagram
     participant API as chat.py
     participant CAS as ChatApplicationService
     participant FPR as FastPathRouter
+    participant Redis as Redis
+    participant PG as PostgreSQL
+
+    U->>API: POST /api/v1/chat/message
+    API->>CAS: execute(auth, request)
+    CAS->>Redis: acquire distributed lock
+    CAS->>Redis: check idempotency cache
+
+    CAS->>FPR: match(message)
+    Note over FPR: Evaluates compiled Regex
+    FPR-->>CAS: FastPathResult (zero LLM tokens)
+    CAS-->>U: Response (immediate)
+    CAS->>PG: persist messages (background)
+    CAS->>Redis: release distributed lock
+```
+
+### 7.2 Flow B: LLM Pipeline (Complex Requests)
+
+If the message fails the Fast Path regex evaluation, the system loads the session context and routes it through the semantic cache, intent detector, and the three-engine AI orchestrator.
+
+```mermaid
+sequenceDiagram
+    participant U as User / Frontend
+    participant CAS as ChatApplicationService
     participant CS as ChatService
     participant ID as IntentDetector
     participant IR as IntentRouter
@@ -214,58 +258,45 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant Redis as Redis
 
-    U->>API: POST /api/v1/chat/message
-    API->>CAS: execute(auth, request)
-    CAS->>Redis: acquire distributed lock
-    CAS->>Redis: check idempotency cache
-
-    CAS->>FPR: match(message)
-    alt Fast Path Hit (greeting/thanks/goodbye)
-        FPR-->>CAS: FastPathResult (zero LLM tokens)
-        CAS-->>U: Response (immediate)
-        CAS->>PG: persist messages (background)
-    else Fast Path Miss
-        CAS->>Redis: load session context + history
-        CAS->>CS: generate_response(domain_request)
-        CS->>ID: detect_complex(message)
-        ID-->>CS: IntentResult (intent, confidence, source)
-        CS->>IR: route(intent_result)
-        IR-->>CS: RoutingDecision (route: fast_path/llm_path/fallback)
-
-        opt Static intent (greeting/faq/chit_chat)
-            CS->>SC: search(message, intent)
-            alt Cache Hit
-                SC-->>CS: cached response
-                CS-->>CAS: ChatDomainResponse (cached)
-            end
+    CAS->>Redis: load session context + history
+    CAS->>CS: generate_response(domain_request)
+    CS->>ID: detect_complex(message)
+    ID-->>CS: IntentResult (intent, confidence, source)
+    CS->>IR: route(intent_result)
+    IR-->>CS: RoutingDecision (route: fast_path/llm_path/fallback)
+    
+    opt Static intent (greeting/faq/chit_chat)
+        CS->>SC: search(message, intent)
+        alt Cache Hit
+            SC-->>CS: cached response
+            CS-->>CAS: ChatDomainResponse (cached)
         end
-
-        CS->>AIO: generate_complex(input, intent, payload)
-
-        Note over AIO: Step 1 - Planner Engine
-        AIO->>FP: generate(LLMRequest with tools)
-        FP->>FP: rank providers by health score
-        FP-->>AIO: LLMResponse (may contain tool_calls)
-
-        opt Tool calls present
-            Note over AIO: Step 2 - Execution Engine
-            AIO->>Tools: call_tool(name, args, runtime_deps)
-            Tools->>PG: execute DB query
-            PG-->>Tools: query results
-            Tools-->>AIO: sanitized tool results
-
-            Note over AIO: Step 3 - Renderer Engine
-            AIO->>FP: generate(synthesis request with tool_results)
-            FP-->>AIO: final user-facing response
-        end
-
-        AIO-->>CS: (content, tokens, tool_results)
-        CS-->>CAS: ChatDomainResponse
-        CAS-->>U: ChatMessageResponse
-        CAS->>PG: persist user + assistant messages (background)
-        CAS->>Redis: persist to memory (background)
     end
 
+    CS->>AIO: generate_complex(input, intent, payload)
+
+    Note over AIO: Step 1 - Planner Engine
+    AIO->>FP: generate(LLMRequest with tools)
+    FP->>FP: rank providers by health score
+    FP-->>AIO: LLMResponse (may contain tool_calls)
+
+    opt Tool calls present
+        Note over AIO: Step 2 - Execution Engine
+        AIO->>Tools: call_tool(name, args, runtime_deps)
+        Tools->>PG: execute DB query
+        PG-->>Tools: query results
+        Tools-->>AIO: sanitized tool results
+
+        Note over AIO: Step 3 - Renderer Engine
+        AIO->>FP: generate(synthesis request with tool_results)
+        FP-->>AIO: final user-facing response
+    end
+
+    AIO-->>CS: (content, tokens, tool_results)
+    CS-->>CAS: ChatDomainResponse
+    CAS-->>U: ChatMessageResponse
+    CAS->>PG: persist user + assistant messages (background)
+    CAS->>Redis: persist to memory (background)
     CAS->>Redis: release distributed lock
 ```
 
@@ -367,7 +398,7 @@ Handling complex multi-step tasks, such as searching for events and executing bo
 
 ### 8.6 Fast Path Router
 
-To minimize unnecessary LLM usage and guarantee instant responses for common interactions, the system introduces a lightweight routing layer. The `FastPathRouter` (`app/ai/fast_path_router.py`) intercepts social/meta intents (greeting, identity, thanks, goodbye) using compiled regex patterns and returns predefined branded responses in Arabic without any LLM calls. This optimization saves approximately 1,400 tokens per matched interaction.
+To minimize unnecessary LLM usage and guarantee instant responses for common interactions, the system introduces a lightweight routing layer. The `FastPathRouter` (`app/ai/fast_path_router.py`) intercepts social/meta intents (greeting, identity, thanks, goodbye) using compiled regex patterns and returns predefined branded responses in Arabic without any LLM calls. This optimization results in an estimated token reduction of approximately 1400 tokens according to internal configuration constants.
 
 ### 8.7 Tool Calling
 
@@ -383,7 +414,7 @@ The orchestrator dynamically filters which tools are available based on the dete
 
 ### 8.8 Semantic Cache
 
-To further help reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py`. The cache has a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, and `app/services/semantic_cache_service.py`).
+To further help reduce latency and API costs for frequently asked questions, the system leverages vector-based caching for semantic similarity rather than exact text matching. The `SemanticCacheService` (`app/services/semantic_cache_service.py`) provides an in-memory vector cache using FAISS (`faiss-cpu==1.10.0`) and SentenceTransformers (`sentence-transformers==3.4.1` with the `all-MiniLM-L6-v2` model, 384-dimensional embeddings). It is used exclusively for static intents (`greeting`, `general_faq`, `chit_chat`, `fallback`) as defined in `app/services/chat_service.py`. The cache features lazy loading to defer model initialization until the first request, and operates with a similarity threshold of 0.88, a TTL of 7 days, and a maximum capacity of 5,000 entries with FIFO eviction (from `app/core/config.py`, and `app/services/semantic_cache_service.py`).
 
 ## 9. Database Design
 
@@ -517,6 +548,8 @@ The following design patterns were identified and verified in the codebase:
 | **Decorator-Based Registration** | `app/ai/tool_registry.py` (`@ToolRegistry.register_tool`), `app/ai/providers/registry.py` (`@register_provider`) | Enables plug-and-play auto-discovery of tools and providers without manual registration lists. |
 | **Adapter Pattern** | `app/infrastructure/adapters/redis_lock_adapter.py`, `redis_state_adapter.py`, `redis_resilience_adapter.py`, `ai_token_adapter.py` | Bridges infrastructure concerns (Redis, token counting) to abstract ports defined in `app/core/ports/`, isolating the service layer from infrastructure details. |
 | **Template Method** | `app/services/ai_orchestrator.py` (`_execute_llm_path` calling `_plan_step` → `_execute_step` → `_render_step`) | Defines a fixed algorithm skeleton (Plan → Execute → Render) with overridable steps. |
+| **Facade Pattern** | `app/services/chat_application_service.py` | Provides a simplified, high-level interface (`execute`) to a complex subsystem of routers, orchestrators, and repositories. |
+| **Builder Pattern** | `app/ai/prompt_builder.py` | Constructs complex LLM prompts step-by-step (adding system instructions, injecting tool context, appending memory/summaries, and assembling message history) before final generation. |
 
 The following snippet illustrates the Dependency Injection pattern in `app/core/container.py`:
 
@@ -588,7 +621,38 @@ The API follows RESTful conventions with versioned routing under `/api/v1/`. All
 | `POST` | `/api/v1/health/cache/reset` | Full cache reset | `app/api/v1/routes/health.py` |
 | `POST` | `/api/v1/health/cache/reload-prompt/{name}` | Hot-reload a single prompt | `app/api/v1/routes/health.py` |
 
-### 12.2 Typical Request Flow
+### 12.2 Payload Examples
+
+The following JSON payloads demonstrate a typical interaction with the `POST /api/v1/chat/message` endpoint:
+
+**Request Example**
+```json
+{
+  "session_id": "123e4567-e89b-12d3-a456-426614174000",
+  "message": "Are there any tech conferences next week?",
+  "metadata": {
+    "platform": "web",
+    "language": "en"
+  }
+}
+```
+
+**Response Example**
+```json
+{
+  "session_id": "123e4567-e89b-12d3-a456-426614174000",
+  "content": "Yes, I found two tech conferences happening next week in your area.",
+  "status": "success",
+  "intent": "search_events",
+  "token_usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 45,
+    "total_tokens": 165
+  }
+}
+```
+
+### 12.3 Typical Request Flow
 
 The following diagram illustrates the standard data flow from the client through the application layers to the database:
 
@@ -601,7 +665,7 @@ graph TD
     Repository --> DB[Database]
 ```
 
-### 12.3 Request and Response Flow
+### 12.4 Request and Response Flow
 
 API controllers are intentionally thin. The `send_chat_message` endpoint, for example, performs only authentication resolution before delegating entirely to the application service:
 
@@ -677,7 +741,7 @@ The CI/CD workflow (`.github/workflows/deploy.yml`) automates deployment to **Az
 
 ## 14. Key Metrics and Results
 
-No automated benchmarking scripts, load testing results, or test coverage reports were found in the repository. The following table provides a snapshot of the repository's metrics at the time of writing, along with a placeholder structure for performance metrics that could be collected in future work.
+No automated benchmarking scripts, load testing results, or test coverage reports were found in the repository. The following table provides a snapshot of the repository's metrics at the time of writing.
 
 | Metric | Value | Source |
 |---|---|---|
@@ -686,12 +750,10 @@ No automated benchmarking scripts, load testing results, or test coverage report
 | Database Tables (Chatbot DB) | 6 | `app/models/chatbot/` (verified count) |
 | Registered AI Tools | 3 | `app/ai/tools/` (verified count) |
 | Fast Path Response Types | 4 (greeting, identity, thanks, goodbye) | `app/ai/fast_path_router.py` |
-| Estimated tokens saved per fast-path hit | ~1,400 | `app/ai/fast_path_router.py` |
+| Estimated tokens saved per fast-path hit | ~1,400 (Estimated) | `app/ai/fast_path_router.py` |
 | Semantic Cache Max Size | 5,000 entries | `app/services/semantic_cache_service.py` |
 | Unit Test Files | 10 | `tests/unit/` |
 | Integration Test Files | 7 | `tests/integration/` |
-| Average response latency | **[VERIFY]** — no benchmarks found | — |
-| Test coverage percentage | **[VERIFY]** — no coverage report found | — |
 
 ## 15. Challenges Faced and Design Decisions
 
@@ -709,7 +771,7 @@ Enterprise conversational AI systems face unique vulnerabilities, ranging from t
 
 ### 16.1 API and Authentication Security
 - **JWT Authentication**: User sessions are strictly authenticated using JSON Web Tokens (JWT), ensuring data privacy and secure session tracking.
-- **API Key Authentication**: Inter-service communication and integration clients utilize API keys (pp/core/api_key_auth.py).
+- **API Key Authentication**: Inter-service communication and integration clients utilize API keys (`app/core/api_key_auth.py`).
 - **Secrets Management**: Sensitive credentials, database URIs, and LLM API keys are never hardcoded; they are injected securely via Environment Variables in Azure Container Apps.
 
 ### 16.2 Data and Database Security
@@ -718,7 +780,7 @@ Enterprise conversational AI systems face unique vulnerabilities, ranging from t
 
 ### 16.3 LLM and Prompt Security
 The system implements a multi-layered defense against prompt injection attacks:
-- **Input Layer**: InputSafetyGuard (pp/ai/safety.py) blocks messages matching known injection patterns (e.g., 'ignore previous instructions', 'you are now').
+- **Input Layer**: InputSafetyGuard (`app/ai/safety.py`) blocks messages matching known injection patterns (e.g., 'ignore previous instructions', 'you are now').
 - **History Layer**: ResponseValidator.sanitize_history() limits context sizes and drops history messages containing injection patterns to prevent context poisoning.
 - **Tool Output Layer**: A semantic firewall in the orchestrator strips forbidden keys and injection markers from database tool results before passing them to the LLM.
 - **Synthesis Isolation**: The Renderer Engine receives only tool results, never the raw tool definitions, completely preventing hallucinated tool execution.
@@ -738,6 +800,7 @@ The system implements a multi-layered defense against prompt injection attacks:
 6. **Streaming Responses**: Implement Server-Sent Events (SSE) or WebSocket-based streaming to display AI responses token-by-token for improved perceived latency.
 7. **Observability and OpenTelemetry**: Implement comprehensive observability using OpenTelemetry to trace requests across all microservices, LLM providers, and databases.
 8. **Analytics Dashboard**: Develop a specialized dashboard to monitor chatbot performance, track user engagement, and visualize key metrics (e.g., token usage, fallback rates).
+9. **Model Context Protocol (MCP)**: Support additional external tools through MCP servers to expand the chatbot's operational scope.
 
 ## 18. Conclusion
 
@@ -749,4 +812,4 @@ At the time of writing, the audited version of the project leverages a curated s
 
 ---
 
-*This document was generated from a structured audit of the TeGy-Chatbot repository. All technical claims are traced to specific source files. Items marked with [VERIFY] require manual confirmation.*
+*This document was generated from a structured audit of the TeGy-Chatbot repository. All technical claims are traced to specific source files.*

@@ -110,17 +110,17 @@ _PATTERN_MAP: list[tuple[FastPathType, re.Pattern[str]]] = [
             ^
             (?:
                 # Arabic thanks
-                شكر(?:ا|ًا|اً)? |                  # شكرا / شكر
-                متشكر |
+                (?:ألف\s+|الف\s+)?شكر(?:ا|ًا|اً)?(?:\s+(?:جداً|جدا|جزيلا|جزيلاً|لك))? | # شكرا / شكرا جدا / الف شكر
+                متشكر(?:ين)?(?:\s+(?:جدا|جداً|اوي|أوي))? |
                 ممنون |
                 مشكور |
-                تسلم |
+                تسلم(?:\s+(?:ايدك|إيدك))? |
                 يسلمو |
-                جزاك\s+الله\s+خير |
+                جزاك\s+الله\s+خير(?:ا|اً)? |
                 بارك\s+الله\s+فيك |
                 # English thanks
-                thank\s+you |
-                thanks? |
+                (?:many\s+)?thanks?(?:\s+(?:a\s+lot|very\s+much))? |
+                thank\s+you(?:\s+(?:very\s+much|so\s+much))? |
                 thx | ty | thnx |
                 much\s+appreciated |
                 appreciate\s+(?:it|that) |

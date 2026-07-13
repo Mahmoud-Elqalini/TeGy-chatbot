@@ -78,7 +78,7 @@ class AIOrchestrator:
             
             # Dynamic Tool Injection based on intent
             if intent in ["booking", "create_booking"]:
-                allowed = {"check_availability", "create_booking", "get_user_profile"}
+                allowed = {"check_availability", "get_user_profile"}
             elif intent in ["discover", "support_event", "get_event_details", "search_events"]:
                 allowed = {"search_events", "get_event_details", "get_user_profile"}
             elif intent in ["manage_booking", "get_booking", "cancel_booking", "get_user_bookings"]:

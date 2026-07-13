@@ -10,7 +10,7 @@ import time
 import httpx
 import json
 
-from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.ai.providers.base import LLMProvider, LLMRequest, LLMResponse, strip_channel_markup
 from app.ai.providers.registry import register_provider
 from app.ai.providers.resilience import ProviderCircuitBreaker, ProviderMetrics, retry_with_backoff
 from app.core.config import settings
@@ -171,7 +171,7 @@ class GroqProvider(LLMProvider):
 
             choice = data["choices"][0]
             message = choice["message"]
-            content = message.get("content", "")
+            content = strip_channel_markup(message.get("content", ""))
             usage = data.get("usage", {})
 
             # Parse tool calls for OpenAI format

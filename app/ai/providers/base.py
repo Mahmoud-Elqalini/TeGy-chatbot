@@ -1,8 +1,38 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Union, Any
+
+# Pre-compiled pattern for model channel markup (e.g. Command R+, gpt-oss on Fireworks).
+# Format: <|channel|>analysis<|message|>...thinking...<|channel|>response<|message|>...reply...
+_CHANNEL_TAG_RE = re.compile(r"<\|channel\|>.*?<\|message\|>", re.DOTALL)
+
+
+def strip_channel_markup(content: str) -> str:
+    """
+    Strip leaked reasoning-channel markup from model output.
+
+    Some open-weight models (Command R+, gpt-oss-120b) use a channel protocol
+    like ``<|channel|>analysis<|message|>`` for internal reasoning and
+    ``<|channel|>response<|message|>`` for the user-facing reply.  When the API
+    doesn't strip these tokens, the raw markup leaks into the content field.
+
+    Strategy:
+      1. If a ``response`` channel exists → keep only the text after it.
+      2. Otherwise → strip all channel/message tags and return what remains.
+    """
+    if "<|channel|>" not in content:
+        return content
+
+    # Prefer the explicit response channel
+    response_marker = "<|channel|>response<|message|>"
+    if response_marker in content:
+        return content.split(response_marker)[-1].strip()
+
+    # Fallback: remove all channel tags, keep the remaining text
+    return _CHANNEL_TAG_RE.sub("", content).strip()
 
 
 @dataclass(slots=True)

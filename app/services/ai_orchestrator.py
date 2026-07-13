@@ -35,7 +35,8 @@ INTENT_TOOL_MAP = {
     "create_booking":    "create_booking",
     "get_booking":       "get_booking",
     "cancel_booking":    "cancel_booking",
-    "get_user_bookings": "get_user_bookings",
+    "manage_booking":    "search_orders",
+    "get_user_bookings": "search_orders",
 }
 
 
@@ -81,8 +82,8 @@ class AIOrchestrator:
                 allowed = {"search_events", "get_event_details", "check_availability", "get_user_profile"}
             elif intent in ["discover", "support_event", "get_event_details", "search_events"]:
                 allowed = {"search_events", "get_event_details", "get_user_profile", "report_support_issue"}
-            elif intent in ["manage_booking", "get_booking", "cancel_booking", "get_user_bookings"]:
-                allowed = {"get_booking", "cancel_booking", "get_user_bookings", "get_user_profile"}
+            elif intent in ["manage_booking", "get_booking", "cancel_booking", "search_orders"]:
+                allowed = {"get_booking", "cancel_booking", "search_orders", "get_user_profile", "report_support_issue"}
             elif intent in ["support_technical", "support_billing", "support_general"]:
                 allowed = {"report_support_issue", "get_user_profile"}
             elif intent in ["greeting", "general_faq", "chit_chat", "fallback"]:

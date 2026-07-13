@@ -86,7 +86,7 @@ class Settings(BaseSettings):
 
     # Timeouts
     AI_REQUEST_TIMEOUT: int = 45
-    CHAT_MAX_HISTORY: int = 5
+    CHAT_MAX_HISTORY: int = 12
     REDIS_OPERATION_TIMEOUT: int = 3
     DB_OPERATION_TIMEOUT: int = 5
 

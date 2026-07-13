@@ -39,5 +39,6 @@ class PromptBuilder:
             parts.append(f"Conversation summary:\n{context.current_summary}")
         return "\n\n".join(parts)
 
-    def build_history(self, messages: list[dict[str, Any]], max_messages: int = 4) -> list[dict[str, Any]]:
-        return messages[-max_messages:]
+    def build_history(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # History is already trimmed to CHAT_MAX_HISTORY by ChatMemoryService
+        return messages

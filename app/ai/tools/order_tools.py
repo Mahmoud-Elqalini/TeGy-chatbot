@@ -26,9 +26,9 @@ async def search_orders(user_id: Union[str, uuid.UUID] = None, main_db: Any = No
         user_str = str(user_id)
         query = text("""
             SELECT o.Id as order_id, o.Status, o.Price as amount, o.CreatedAt as created_at,
-                   e.id as event_id, e.name as event_name, e.start_date
+                   e.Id as event_id, e.Title as event_name, e.StartDate as start_date
             FROM Orders o
-            LEFT JOIN events e ON o.EventId = e.id
+            LEFT JOIN Events e ON o.EventId = e.Id
             WHERE o.UserId = :uid
             ORDER BY o.CreatedAt DESC
         """)

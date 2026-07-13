@@ -23,20 +23,22 @@ class IntentDetector:
     SUPPORT_MAP = {
         "billing": {
             "refund", "payment", "price", "charge", "invoice", "cost", "bill", "money", 
-            "subscription", "checkout", "receipt", "paid", "fees"
+            "subscription", "checkout", "receipt", "paid", "fees", "دفع", "فلوس", "رصيد", "حساب", "سعر", "تكلفة", "استرجاع", "خصم"
         },
         "technical": {
             "bug", "error", "login", "app", "website", "broken", "technical", "fail", 
-            "crash", "slow", "down", "password", "access", "connection"
+            "crash", "slow", "down", "password", "access", "connection", "مشكلة", "تطبيق", "ابلكيشن", "موقع", "باسورد", "تسجيل", "عطل", "مش شغال", "مش بيفتح"
         },
         "event": {
             "location", "date", "time", "event", "place", "directions", "where", "when", 
-            "schedule", "agenda", "venue", "map", "address"
+            "schedule", "agenda", "venue", "map", "address", "تفاصيل", "مكان", "وقت", "موعد", "خريطة", "عنوان", "موقع"
         },
     }
-    SUPPORT_HINTS = {"support", "help", "problem", "issue", "cancel", "assistant", "manager", "representative"}
-    BOOKING_HINTS = {"ticket", "booking", "reserve", "seat", "buy", "purchase", "order", "reservation", "confirm"}
-    GREETING_HINTS = {"hi", "hello", "hey", "hola", "هاي", "سلام", "اهلا", "مرحبا", "صباح", "مساء"}
+    SUPPORT_HINTS = {"support", "help", "problem", "issue", "cancel", "assistant", "manager", "representative", "دعم", "مساعدة", "مشكلة", "الغاء"}
+    BOOKING_HINTS = {"ticket", "booking", "reserve", "seat", "buy", "purchase", "order", "reservation", "confirm", "حجز", "تذكرة", "تذاكر", "احجز", "كرسي", "شراء", "اشتري", "تأكيد"}
+    DISCOVER_HINTS = {"search", "find", "looking", "discover", "explore", "show", "events", "concert", "party", "match", "دور", "ابحث", "حفلة", "ماتش", "خروجة", "فعاليات", "ايفنت", "ايفنتات", "عرض", "حفلات", "مسرحية"}
+    MANAGE_HINTS = {"my bookings", "my tickets", "history", "past", "upcoming", "حجوزاتي", "تذاكري", "سابقة", "قادمة", "الغي", "تعديل"}
+    GREETING_HINTS = {"hi", "hello", "hey", "hola", "هاي", "سلام", "اهلا", "مرحبا", "صباح", "مساء", "اسمك"}
 
     def __init__(self, response_generator: Optional[Any] = None):
         """
@@ -77,8 +79,16 @@ class IntentDetector:
 
         # Check for Booking Hints
         if tokens & self.BOOKING_HINTS:
-            confidence = 0.9 if any(p in normalized for p in ["book a ticket", "buy a ticket", "reserve a seat"]) else 0.85
+            confidence = 0.9 if any(p in normalized for p in ["book a ticket", "buy a ticket", "reserve a seat", "عايز احجز", "تذكرتين", "احجز تذكرة"]) else 0.85
             return "booking", confidence
+
+        # Check for Discover Hints
+        if tokens & self.DISCOVER_HINTS:
+            return "discover", 0.85
+
+        # Check for Manage Hints
+        if tokens & self.MANAGE_HINTS:
+            return "manage_booking", 0.85
 
         # Check for Greeting Hints
         if tokens & self.GREETING_HINTS:
@@ -138,7 +148,9 @@ class IntentDetector:
         """
         prompt = f"""
         Classify the user message into exactly ONE category:
+        - discover
         - booking
+        - manage_booking
         - support_billing
         - support_technical
         - support_event
@@ -155,16 +167,15 @@ class IntentDetector:
             detected = response.content.strip().lower()
             tokens_used = response.prompt_tokens + response.completion_tokens
             
-            valid_intents = {"booking", "support_billing", "support_technical", "support_event", "greeting", "general"}
+            valid_intents = {"discover", "booking", "manage_booking", "support_billing", "support_technical", "support_event", "greeting", "general"}
             if detected in valid_intents:
                 return detected, tokens_used
             
             # Map common LLM variations if any
             if "ticket" in detected or "reserve" in detected: return "booking", tokens_used
             if "bill" in detected or "pay" in detected: return "support_billing", tokens_used
+            if "find" in detected or "search" in detected: return "discover", tokens_used
             
             return "general", tokens_used
         except Exception:
             raise
-
-

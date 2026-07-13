@@ -30,11 +30,15 @@ class PromptBuilder:
             parts.append(f"Channel: {context.channel}")
         return "\n\n".join(parts)
 
-    def build_renderer_prompt(self, context: ChatContext) -> str:
+    def build_renderer_prompt(self, context: ChatContext, detected_intent: Optional[str] = None) -> str:
         """Isolated prompt specifically for the Renderer Engine."""
         parts = [PromptLoader.load("synthesis_policy")]
         
-        # Only add metadata, NO full rules or identity.
+        # Inject phase-specific safety rules so the Renderer doesn't hallucinate
+        intent = detected_intent or context.current_intent
+        if intent == "booking":
+            parts.append(PromptLoader.load("phase_booking"))
+
         if context.current_summary:
             parts.append(f"Conversation summary:\n{context.current_summary}")
         return "\n\n".join(parts)

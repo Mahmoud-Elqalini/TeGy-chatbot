@@ -97,7 +97,7 @@ class ChatService:
         # 2. Construction
         with tracer.step("prompt_construction"):
             system_prompt = self.prompt_builder.build_system_prompt(domain_request.context, routing["intent"])
-            renderer_prompt = self.prompt_builder.build_renderer_prompt(domain_request.context)
+            renderer_prompt = self.prompt_builder.build_renderer_prompt(domain_request.context, routing["intent"])
             history_formatted = self.prompt_builder.build_history(domain_request.history)
 
         # 3. Generation

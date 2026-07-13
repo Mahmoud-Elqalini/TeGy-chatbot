@@ -469,15 +469,43 @@ class AIOrchestrator:
             token_breakdown["renderer_prompt_tokens"] = render_response.prompt_tokens
             token_breakdown["renderer_completion_tokens"] = render_response.completion_tokens
 
+            # ── Booking URL Safety Net ─────────────────────────────────
+            final_content = render_response.content
+            if intent == "booking":
+                event_id = self._extract_event_id(tool_results)
+                final_content = self.response_validator.sanitize_booking_response(final_content, event_id)
+
             trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
             logger.info("request.trace", trace=trace.model_dump())
             reset_active_trace(trace_token)
-            return render_response.content, total_tokens, tool_results, token_breakdown
+            return final_content, total_tokens, tool_results, token_breakdown
+
+        # ── Booking URL Safety Net (no-tool path) ─────────────────
+        final_content = plan_response.content
+        if intent == "booking":
+            final_content = self.response_validator.sanitize_booking_response(final_content)
 
         trace.end_to_end_ms = round((time.perf_counter() - pipeline_start) * 1000, 2)
         logger.info("request.trace", trace=trace.model_dump())
         reset_active_trace(trace_token)
-        return plan_response.content, total_tokens, [], token_breakdown
+        return final_content, total_tokens, [], token_breakdown
+
+    @staticmethod
+    def _extract_event_id(tool_results: list[dict]) -> str | None:
+        """Extracts event_id from tool results for URL construction."""
+        for result in tool_results:
+            output = result.get("output", {})
+            if isinstance(output, dict):
+                eid = output.get("event_id") or output.get("id")
+                if eid:
+                    return str(eid)
+                # Check nested events list
+                events = output.get("events", [])
+                if events and isinstance(events, list) and isinstance(events[0], dict):
+                    eid = events[0].get("event_id") or events[0].get("id")
+                    if eid:
+                        return str(eid)
+        return None
 
     # -------------------------------------------------------------------------
     # _execute_fast_path — DEPRECATED

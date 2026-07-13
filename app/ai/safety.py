@@ -55,11 +55,48 @@ class InputSafetyGuard:
 
 
 class ResponseValidator:
+    # Matches any URL that looks like a payment/booking link but is NOT tegy.online/event/
+    _FAKE_URL_PATTERN = re.compile(
+        r'https?://(?!tegy\.online/event/)\S+',
+        re.IGNORECASE
+    )
+    _VALID_TEGY_URL = re.compile(
+        r'https://tegy\.online/event/\d+',
+        re.IGNORECASE
+    )
+    # Matches credit card detail requests
+    _CARD_DETAIL_PATTERN = re.compile(
+        r'(?:CVV|CVC|رقم البطاقة|card\s*number|expir|تاريخ الانتهاء|بطاقت)',
+        re.IGNORECASE
+    )
+
     def validate_response(self, content: str) -> str:
         cleaned = content.strip()
         if not cleaned:
             raise ValidationException("AI response was empty.")
         return cleaned
+
+    def sanitize_booking_response(self, content: str, event_id: str = None) -> str:
+        """
+        Hard safety layer: replaces any fake/hallucinated URLs with the correct tegy.online format.
+        Called ONLY for booking-intent responses.
+        """
+        # If there are fake URLs but no valid tegy.online URL, inject the correct one
+        if self._FAKE_URL_PATTERN.search(content) and not self._VALID_TEGY_URL.search(content):
+            logger.warning("safety.fake_url_detected", content_preview=content[:100])
+            # Replace all fake URLs with the correct format
+            if event_id:
+                correct_url = f"https://tegy.online/event/{event_id}"
+                content = self._FAKE_URL_PATTERN.sub(correct_url, content)
+            else:
+                content = self._FAKE_URL_PATTERN.sub("[رابط غير صالح - يرجى التواصل مع الدعم]", content)
+
+        # Strip any credit card detail collection attempts
+        if self._CARD_DETAIL_PATTERN.search(content):
+            logger.warning("safety.card_detail_collection_attempt")
+            content = self._CARD_DETAIL_PATTERN.sub("[محذوف لأسباب أمنية]", content)
+
+        return content
 
     def sanitize_tool_output(self, tool_output: str) -> str:
         if not tool_output:
